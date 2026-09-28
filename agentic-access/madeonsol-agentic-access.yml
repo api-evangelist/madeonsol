@@ -1,0 +1,364 @@
+generated: '2026-09-28'
+method: generated
+source: openapi/madeonsol.json
+description: Recommended x-agentic-access execution contracts, classified heuristically from
+  the OpenAPI. A governance starting point for exposing this API to AI agents — review and bind
+  audience per deployment. See research/curity/agentic-governance/.
+summary:
+  operations: 35
+  by_action_class:
+    connected: 35
+  by_consequence:
+    read: 35
+  human_in_the_loop_required: 0
+operations:
+- path: /api/x402/kol/coordination
+  method: get
+  operationId: kol_coordination
+  x-agentic-access:
+    action-class: connected
+    consequence: read
+    subject: optional
+    token:
+      max-ttl: 3600
+    audit: none
+- path: /api/x402/kol/feed
+  method: get
+  operationId: kol_feed
+  x-agentic-access:
+    action-class: connected
+    consequence: read
+    subject: optional
+    token:
+      max-ttl: 3600
+    audit: none
+- path: /api/x402/kol/leaderboard
+  method: get
+  operationId: kol_leaderboard
+  x-agentic-access:
+    action-class: connected
+    consequence: read
+    subject: optional
+    token:
+      max-ttl: 3600
+    audit: none
+- path: /api/x402/kol/pairs
+  method: get
+  operationId: kol_pairs
+  x-agentic-access:
+    action-class: connected
+    consequence: read
+    subject: optional
+    token:
+      max-ttl: 3600
+    audit: none
+- path: /api/x402/kol/tokens/hot
+  method: get
+  operationId: kol_tokens_hot
+  x-agentic-access:
+    action-class: connected
+    consequence: read
+    subject: optional
+    token:
+      max-ttl: 3600
+    audit: none
+- path: /api/x402/kol/tokens/trending
+  method: get
+  operationId: kol_tokens_trending
+  x-agentic-access:
+    action-class: connected
+    consequence: read
+    subject: optional
+    token:
+      max-ttl: 3600
+    audit: none
+- path: /api/x402/kol/tokens/{mint}/entry-order
+  method: get
+  operationId: kol_tokens_mint_entry-order
+  x-agentic-access:
+    action-class: connected
+    consequence: read
+    subject: optional
+    token:
+      max-ttl: 3600
+    audit: none
+- path: /api/x402/kol/compare
+  method: get
+  operationId: kol_compare
+  x-agentic-access:
+    action-class: connected
+    consequence: read
+    subject: optional
+    token:
+      max-ttl: 3600
+    audit: none
+- path: /api/x402/kol/alerts/recent
+  method: get
+  operationId: kol_alerts_recent
+  x-agentic-access:
+    action-class: connected
+    consequence: read
+    subject: optional
+    token:
+      max-ttl: 3600
+    audit: none
+- path: /api/x402/deployer-hunter/alerts
+  method: get
+  operationId: deployer-hunter_alerts
+  x-agentic-access:
+    action-class: connected
+    consequence: read
+    subject: optional
+    token:
+      max-ttl: 3600
+    audit: none
+- path: /api/x402/wallet/{address}
+  method: get
+  operationId: wallet_address
+  x-agentic-access:
+    action-class: connected
+    consequence: read
+    subject: optional
+    token:
+      max-ttl: 3600
+    audit: none
+- path: /api/x402/wallet/{address}/pnl
+  method: get
+  operationId: wallet_address_pnl
+  x-agentic-access:
+    action-class: connected
+    consequence: read
+    subject: optional
+    token:
+      max-ttl: 3600
+    audit: none
+- path: /api/x402/wallet/{address}/positions
+  method: get
+  operationId: wallet_address_positions
+  x-agentic-access:
+    action-class: connected
+    consequence: read
+    subject: optional
+    token:
+      max-ttl: 3600
+    audit: none
+- path: /api/x402/wallet/{address}/trades
+  method: get
+  operationId: wallet_address_trades
+  x-agentic-access:
+    action-class: connected
+    consequence: read
+    subject: optional
+    token:
+      max-ttl: 3600
+    audit: none
+- path: /api/x402/tokens/{mint}/risk
+  method: get
+  operationId: tokens_mint_risk
+  x-agentic-access:
+    action-class: connected
+    consequence: read
+    subject: optional
+    token:
+      max-ttl: 3600
+    audit: none
+- path: /api/x402/tokens/{mint}/buyer-quality
+  method: get
+  operationId: tokens_mint_buyer-quality
+  x-agentic-access:
+    action-class: connected
+    consequence: read
+    subject: optional
+    token:
+      max-ttl: 3600
+    audit: none
+- path: /api/x402/token/{mint}
+  method: get
+  operationId: token_mint
+  x-agentic-access:
+    action-class: connected
+    consequence: read
+    subject: optional
+    token:
+      max-ttl: 3600
+    audit: none
+- path: /api/x402/signals/{name}/performance
+  method: get
+  operationId: signals_name_performance
+  x-agentic-access:
+    action-class: connected
+    consequence: read
+    subject: optional
+    token:
+      max-ttl: 3600
+    audit: none
+- path: /api/x402/tokens/{mint}/candles
+  method: get
+  operationId: tokens_mint_candles
+  x-agentic-access:
+    action-class: connected
+    consequence: read
+    subject: optional
+    token:
+      max-ttl: 3600
+    audit: none
+- path: /api/x402/tokens/{mint}/flow
+  method: get
+  operationId: tokens_mint_flow
+  x-agentic-access:
+    action-class: connected
+    consequence: read
+    subject: optional
+    token:
+      max-ttl: 3600
+    audit: none
+- path: /api/x402/tokens/{mint}/top-traders
+  method: get
+  operationId: tokens_mint_top-traders
+  x-agentic-access:
+    action-class: connected
+    consequence: read
+    subject: optional
+    token:
+      max-ttl: 3600
+    audit: none
+- path: /api/x402/tokens/{mint}/cap-table
+  method: get
+  operationId: tokens_mint_cap-table
+  x-agentic-access:
+    action-class: connected
+    consequence: read
+    subject: optional
+    token:
+      max-ttl: 3600
+    audit: none
+- path: /api/x402/tokens/almost-bonded
+  method: get
+  operationId: tokens_almost-bonded
+  x-agentic-access:
+    action-class: connected
+    consequence: read
+    subject: optional
+    token:
+      max-ttl: 3600
+    audit: none
+- path: /api/x402/sniper/recent
+  method: get
+  operationId: sniper_recent
+  x-agentic-access:
+    action-class: connected
+    consequence: read
+    subject: optional
+    token:
+      max-ttl: 3600
+    audit: none
+- path: /api/x402/deployer-hunter/{address}/trajectory
+  method: get
+  operationId: deployer-hunter_address_trajectory
+  x-agentic-access:
+    action-class: connected
+    consequence: read
+    subject: optional
+    token:
+      max-ttl: 3600
+    audit: none
+- path: /api/x402/rhc/kol/feed
+  method: get
+  operationId: rhc_kol_feed
+  x-agentic-access:
+    action-class: connected
+    consequence: read
+    subject: optional
+    token:
+      max-ttl: 3600
+    audit: none
+- path: /api/x402/rhc/kol/hot-tokens
+  method: get
+  operationId: rhc_kol_hot-tokens
+  x-agentic-access:
+    action-class: connected
+    consequence: read
+    subject: optional
+    token:
+      max-ttl: 3600
+    audit: none
+- path: /api/x402/rhc/kol/leaderboard
+  method: get
+  operationId: rhc_kol_leaderboard
+  x-agentic-access:
+    action-class: connected
+    consequence: read
+    subject: optional
+    token:
+      max-ttl: 3600
+    audit: none
+- path: /api/x402/rhc/tokens/{mint}
+  method: get
+  operationId: rhc_tokens_mint
+  x-agentic-access:
+    action-class: connected
+    consequence: read
+    subject: optional
+    token:
+      max-ttl: 3600
+    audit: none
+- path: /api/x402/rhc/tokens/{mint}/buyer-quality
+  method: get
+  operationId: rhc_tokens_mint_buyer-quality
+  x-agentic-access:
+    action-class: connected
+    consequence: read
+    subject: optional
+    token:
+      max-ttl: 3600
+    audit: none
+- path: /api/x402/rhc/tokens/{mint}/kol-consensus
+  method: get
+  operationId: rhc_tokens_mint_kol-consensus
+  x-agentic-access:
+    action-class: connected
+    consequence: read
+    subject: optional
+    token:
+      max-ttl: 3600
+    audit: none
+- path: /api/x402/rhc/tokens/{mint}/risk
+  method: get
+  operationId: rhc_tokens_mint_risk
+  x-agentic-access:
+    action-class: connected
+    consequence: read
+    subject: optional
+    token:
+      max-ttl: 3600
+    audit: none
+- path: /api/x402/rhc/tokens/{mint}/holders
+  method: get
+  operationId: rhc_tokens_mint_holders
+  x-agentic-access:
+    action-class: connected
+    consequence: read
+    subject: optional
+    token:
+      max-ttl: 3600
+    audit: none
+- path: /api/x402/rhc/wallet/{address}/pnl
+  method: get
+  operationId: rhc_wallet_address_pnl
+  x-agentic-access:
+    action-class: connected
+    consequence: read
+    subject: optional
+    token:
+      max-ttl: 3600
+    audit: none
+- path: /api/x402/rhc/deployer-hunter/alerts
+  method: get
+  operationId: rhc_deployer-hunter_alerts
+  x-agentic-access:
+    action-class: connected
+    consequence: read
+    subject: optional
+    token:
+      max-ttl: 3600
+    audit: none

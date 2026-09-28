@@ -1,0 +1,24 @@
+generated: '2026-09-28'
+method: searched
+generator: extract-docs-artifacts.py (local)
+source: https://madeonsol.com/auth/login?next=/developer
+sources:
+- https://madeonsol.com/auth/login?next=/developer
+- https://madeonsol.com/auth/login?next=%2Fdeveloper
+- https://madeonsol.com/solutions/token-scanners
+- https://madeonsol.com/solutions/token-risk
+idempotency:
+  coverage: none
+pagination:
+  style: cursor
+  params:
+  - limit
+  - next_since
+  - next_before
+  response_fields:
+  - limit
+  - count
+  - has_more
+  - next_since
+  - next_before
+docs: https://madeonsol.com/auth/login?next=/developer

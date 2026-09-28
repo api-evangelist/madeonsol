@@ -1,30 +1,127 @@
 aid: madeonsol
 name: MadeOnSol
-description: 'MadeOnSol is a company surfaced via the API Evangelist harvest backlog (source: new-submission)
-  and added to the network as a stub for full-pipeline profiling.'
+image: https://madeonsol.com/opengraph-image?v=3
+description: MadeOnSol provides on-chain intelligence APIs for Solana and Robinhood Chain, offering real-time KOL wallet tracking, deployer reputation
+  scoring, and all-DEX trade streams. It also hosts a directory of tools and a developer API with SDKs and a pay-per-call x402 model.
 url: https://raw.githubusercontent.com/api-evangelist/madeonsol/refs/heads/main/apis.yml
 x-type: company
 x-source: harvest:new-submission
-x-tier: stub
-x-tier-reason: harvest
+x-tier: profiled
+x-tier-reason: enrichment pass 2026-09-28 (modular-v1; was harvest)
 specificationVersion: '0.20'
 created: '2026-09-28'
 modified: '2026-09-28'
 tags:
-- Company
-apis: []
+- Blockchain
+- Analytics
+- Solana
+- Robinhood Chain
+- API
 maintainers:
 - FN: Kin Lane
   email: kin@apievangelist.com
 - FN: APIs.json
   email: info@apis.io
 common:
+- type: AgenticAccess
+  url: agentic-access/madeonsol-agentic-access.yml
+- type: Plans
+  url: plans/madeonsol-plans-pricing.yml
+- type: Spectral
+  url: rules/madeonsol-rules.yml
+- type: CLI
+  url: cli/madeonsol-cli.yml
+- type: ChangeLog
+  url: changelog/madeonsol-changelog.yml
+- type: Conventions
+  url: conventions/madeonsol-conventions.yml
+- type: Compliance
+  url: https://madeonsol.com/security
+- type: Authentication
+  url: authentication/madeonsol-authentication.yml
+- type: ErrorCatalog
+  url: errors/madeonsol-problem-types.yml
+- type: Conformance
+  url: conformance/madeonsol-conformance.yml
+- type: LLMsTxt
+  url: llms/madeonsol-llms.txt
+- type: SecurityTxt
+  url: well-known/madeonsol-security.txt
+- type: WellKnown
+  url: well-known/madeonsol-well-known.yml
+- type: Hosts
+  url: hosts/madeonsol-hosts.yml
+- type: Vendors
+  url: vendors/madeonsol-vendors.yml
+- type: Packages
+  url: packages/madeonsol-packages.yml
+- type: StatusPage
+  url: https://madeonsol.com/status
+- type: Security
+  url: https://madeonsol.com/security
+- type: SDKs
+  url: https://madeonsol.com/best/sdks
+- type: GitHubOrganization
+  url: https://github.com/madeonsol
+- type: DeveloperPortal
+  url: https://madeonsol.com/developer
+- type: ChangeLog
+  url: https://madeonsol.com/changelog
+- type: TrustCenter
+  url: security/madeonsol-trust-center.yml
+- type: VulnerabilityDisclosure
+  url: security/madeonsol-vulnerability-disclosure.yml
+- type: DomainSecurity
+  url: security/madeonsol-domain-security.yml
 - type: Website
   url: https://madeonsol.com
 - type: Documentation
   url: https://madeonsol.com/api-docs
-x-submission-notes: Emailed directory submission. Onchain intelligence APIs (Solana, Robinhood Chain);
-  SDKs + MCP; x402 pay-per-call. OpenAPI https://madeonsol.com/openapi.json, x402 https://madeonsol.com/.well-known/x402
-x-submission-probe: root 200, invented path 404, api-docs 200, OpenAPI 3.1 200 (35 paths), /.well-known/x402
-  200 json
+- type: Support
+  url: https://madeonsol.com/about
+- type: Blog
+  url: https://madeonsol.com/blog
+- type: Pricing
+  url: https://madeonsol.com/pricing
+- type: SignUp
+  url: https://madeonsol.com/auth/login?next=%2F
+- type: TermsOfService
+  url: https://madeonsol.com/terms
+- type: PrivacyPolicy
+  url: https://madeonsol.com/privacy
+apis:
+- name: MadeOnSol API
+  description: >-
+    Pay-per-call on-chain intelligence API for Solana and Robinhood Chain, providing KOL signals, feeds,
+    leaderboards, and token analytics.
+  humanURL: https://madeonsol.com/api-docs
+  baseURL: https://madeonsol.com
+  aid: madeonsol:madeonsol-api
+- aid: madeonsol:madeonsol-robinhood-chain-api
+  name: MadeOnSol Robinhood Chain API
+  description: The Robinhood Chain API from MadeOnSol — 10 operation(s) for robinhood chain.
+  humanURL: https://madeonsol.com/api-docs
+  tags:
+  - Robinhood Chain
+  properties:
+  - type: OpenAPI
+    url: openapi/madeonsol-robinhood-chain-api-openapi.yml
+- aid: madeonsol:madeonsol-solana-api
+  name: MadeOnSol Solana API
+  description: The Solana API from MadeOnSol — 25 operation(s) for solana.
+  humanURL: https://madeonsol.com/api-docs
+  tags:
+  - Solana
+  properties:
+  - type: OpenAPI
+    url: openapi/madeonsol-solana-api-openapi.yml
+x-submission-notes: Emailed directory submission. Onchain intelligence APIs (Solana, Robinhood Chain); SDKs + MCP; x402 pay-per-call. OpenAPI
+  https://madeonsol.com/openapi.json, x402 https://madeonsol.com/.well-known/x402
+x-submission-probe: root 200, invented path 404, api-docs 200, OpenAPI 3.1 200 (35 paths), /.well-known/x402 200 json
 x-submitted-by: info@madeonsol.com (email/apisio, 2026-09-26)
+x-enrichment:
+  date: '2026-09-28'
+  status: enriched
+  artifacts_added: 21
+  pass: modular-v1
+  engine: identity=local,contract=local,surfaces=local,docs=local,regulatory=local

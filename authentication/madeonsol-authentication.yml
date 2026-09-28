@@ -1,0 +1,20 @@
+generated: '2026-09-28'
+method: searched
+generator: extract-docs-artifacts.py (local)
+source: https://madeonsol.com/auth/login?next=/developer
+sources:
+- https://madeonsol.com/auth/login?next=/developer
+- https://madeonsol.com/auth/login?next=%2Fdeveloper
+- https://madeonsol.com/solutions/token-scanners
+- https://madeonsol.com/solutions/token-risk
+description: MadeOnSol uses a simple API‑key authentication scheme. After signing in, a key is generated on the developer dashboard and must be
+  sent as a Bearer token in the Authorization header.
+schemes:
+- type: http-bearer
+  name: API Key
+  evidence: Your key is generated on the developer dashboard, right after this.
+  location: header
+  header: Authorization
+  how_to_obtain: Sign in on the MadeOnSol website; a key is generated on the developer dashboard.
+note: No OAuth2, apiKey, or other authentication methods are documented on the provided pages.
+docs: https://madeonsol.com/auth/login?next=/developer

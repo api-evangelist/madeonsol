@@ -1,0 +1,19 @@
+generated: '2026-09-28'
+method: derived
+generator: derive-problem-types.py
+source:
+- openapi/madeonsol.json
+format: custom
+envelope:
+  media_type: null
+  schema: null
+coverage:
+  operations: 35
+  statuses_declared: 1
+problems:
+- status: 402
+  title: Payment Required
+  description: Payment Required
+  operations: 35
+  media_types: []
+  schema: null

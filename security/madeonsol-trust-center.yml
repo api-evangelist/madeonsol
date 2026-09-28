@@ -1,0 +1,15 @@
+generated: '2026-09-28'
+method: searched
+probe: true
+source: https://madeonsol.com/security
+url: https://madeonsol.com/security
+certifications:
+- SOC 2
+- ISO 27001
+- GDPR
+evidence:
+- source: https://madeonsol.com/security
+  keywords:
+  - soc 2
+  - iso 27001
+  - gdpr

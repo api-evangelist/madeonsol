@@ -1,0 +1,40 @@
+generated: '2026-09-28'
+method: searched
+generator: extract-docs-artifacts.py (local)
+source: https://madeonsol.com/changelog
+sources:
+- https://madeonsol.com/changelog
+entries:
+- breaking: false
+  highlights:
+  - Copy-trade signals fire only on realtime trades, and KOL trades missed during an outage are recovered
+  - 'A copy-trade signal now fires only while the source trade is realtime: at most 10 seconds old on Solana and 5 seconds on Robinhood Chain,
+    measured by chain time.'
+  - 'The live kol:trade event carries a new nullable ISO field, chain_time_estimate : the block time of the nearest block at or before the trade''s
+    slot.'
+  - Recovered KOL trades are now fetched again from the provider's replay and added to the KOL trade history.
+  date: '2026-09-26'
+- breaking: false
+  highlights:
+  - Business copy-trade rules take 250 source wallets, as sold.
+  - Wallet-tracker webhooks now apply the min_sol, action and conditions filters; before, they were accepted but not applied.
+  - 'Rule webhooks: setting webhook_url with a PATCH now creates a signing secret when the rule had none.'
+  - None of these releases is breaking.
+  date: '2026-09-25'
+- breaking: false
+  highlights:
+  - Duplicate wallet‑tracker events caused by a provider region replay are now dropped thanks to a durable identity check.
+  - Each event now has a durable identity (transaction, subscriber, wallet) checked before it is stored or pushed.
+  date: '2026-09-24'
+- breaking: false
+  highlights:
+  - New Solutions pages at /solutions show how to build common products on the API.
+  date: '2026-09-24'
+- breaking: false
+  highlights:
+  - Six new WebSocket channels added, each with per‑connection caps of 25 (PRO), 100 (ULTRA) or 250 (BUSINESS) tokens or wallets.
+  - Live candles are now sent as token:candles and rhc:token_candles, with closed 1‑minute candles stored shortly after the minute ends.
+  date: '2026-09-23'
+current_version: 2.29.0
+note: Versioning scheme follows semantic versioning (e.g., 2.29.0).
+docs: https://madeonsol.com/changelog

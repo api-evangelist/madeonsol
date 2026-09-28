@@ -1,0 +1,14 @@
+# MadeOnSol — vulnerability disclosure (RFC 9116)
+# Full policy: https://madeonsol.com/security
+
+Contact: mailto:info@madeonsol.com
+Contact: https://madeonsol.com/security
+Expires: 2027-08-01T00:00:00.000Z
+Preferred-Languages: en, nl
+Canonical: https://madeonsol.com/.well-known/security.txt
+Policy: https://madeonsol.com/security
+
+# Good-faith testing against your own account will not be pursued.
+# Please do not run denial-of-service or load tests, and do not access
+# data belonging to other users. Give us reasonable time to remediate
+# before public disclosure. We do not operate a paid bounty programme.

@@ -1,0 +1,20 @@
+generated: '2026-09-28'
+method: searched
+generator: extract-docs-artifacts.py (local)
+source: https://madeonsol.com/api/v1/postman.json
+sources:
+- https://madeonsol.com/api/v1/postman.json
+- https://madeonsol.com/mcp
+- https://madeonsol.com/tools
+- https://madeonsol.com/compare
+install:
+- method: npm
+  command: npm install -g mcp-server-madeonsol
+commands:
+- group: mcp-server-madeonsol
+  purpose: MCP server for Solana data (Claude, Cursor, Claude Code)
+- group: mcp-server-robinhood-chain
+  purpose: MCP server for Robinhood Chain data (Claude, Cursor, Claude Code)
+binary: mcp-server-madeonsol / mcp-server-robinhood-chain
+docs: https://madeonsol.com/api/v1/postman.json
+note: 1 extracted row(s) were dropped because their quote was not on the page.
