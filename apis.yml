@@ -1,0 +1,30 @@
+aid: madeonsol
+name: MadeOnSol
+description: 'MadeOnSol is a company surfaced via the API Evangelist harvest backlog (source: new-submission)
+  and added to the network as a stub for full-pipeline profiling.'
+url: https://raw.githubusercontent.com/api-evangelist/madeonsol/refs/heads/main/apis.yml
+x-type: company
+x-source: harvest:new-submission
+x-tier: stub
+x-tier-reason: harvest
+specificationVersion: '0.20'
+created: '2026-09-28'
+modified: '2026-09-28'
+tags:
+- Company
+apis: []
+maintainers:
+- FN: Kin Lane
+  email: kin@apievangelist.com
+- FN: APIs.json
+  email: info@apis.io
+common:
+- type: Website
+  url: https://madeonsol.com
+- type: Documentation
+  url: https://madeonsol.com/api-docs
+x-submission-notes: Emailed directory submission. Onchain intelligence APIs (Solana, Robinhood Chain);
+  SDKs + MCP; x402 pay-per-call. OpenAPI https://madeonsol.com/openapi.json, x402 https://madeonsol.com/.well-known/x402
+x-submission-probe: root 200, invented path 404, api-docs 200, OpenAPI 3.1 200 (35 paths), /.well-known/x402
+  200 json
+x-submitted-by: info@madeonsol.com (email/apisio, 2026-09-26)
