@@ -1,22 +1,24 @@
 {
   "provider": "madeonsol",
   "sources": [
-    "madeonsol.json"
+    "_original/madeonsol.json"
   ],
   "outputs": [
     "madeonsol-robinhood-chain-api-openapi.yml",
     "madeonsol-solana-api-openapi.yml"
   ],
-  "archived": [
-    "archived openapi/madeonsol.json"
-  ],
+  "archived": [],
   "errors": [],
   "warnings": [],
   "notes": [
+    "sourced from openapi/_original/ (1 archived document(s)); previously refined output at the top level was skipped rather than re-split",
     "madeonsol.json: upgraded openapi 3.1.0 -> OpenAPI 3.2.0",
     "madeonsol.json: declared missing tag: Robinhood Chain",
     "madeonsol.json: declared missing tag: Solana",
-    "apis.yml register: written (+2 apis, 3 total)"
+    "apis.yml register: already-registered"
   ],
-  "skipped": []
+  "skipped": [
+    "madeonsol-robinhood-chain-api-openapi.yml: previously refined output, superseded by openapi/_original/",
+    "madeonsol-solana-api-openapi.yml: previously refined output, superseded by openapi/_original/"
+  ]
 }
