@@ -75,6 +75,20 @@ common:
   url: security/madeonsol-domain-security.yml
 - type: Website
   url: https://madeonsol.com
+- type: APIsJson
+  url: https://madeonsol.com/.well-known/apis.json
+- type: APICatalog
+  url: https://madeonsol.com/.well-known/api-catalog
+- type: AsyncAPI
+  url: https://madeonsol.com/api/v1/asyncapi.json
+- type: AgentSkills
+  url: https://madeonsol.com/skills/index.json
+- type: MCPPackages
+  url: https://madeonsol.com/mcp-packages.json
+- type: AgentsJson
+  url: https://madeonsol.com/agents.json
+- type: x402
+  url: https://madeonsol.com/.well-known/x402
 - type: Documentation
   url: https://madeonsol.com/api-docs
 - type: Support
@@ -92,14 +106,30 @@ common:
 apis:
 - name: MadeOnSol API
   description: >-
-    Pay-per-call on-chain intelligence API for Solana and Robinhood Chain, providing KOL signals, feeds,
-    leaderboards, and token analytics.
+    Keyed on-chain intelligence API for Solana and Robinhood Chain (Bearer msk_ API keys, free and paid tiers):
+    KOL trades and leaderboards, wallet intelligence and funding, token and deployer analytics, risk signals,
+    DEX trade tape and candles, plus WebSocket streams and signed webhooks. A keyless x402 pay-per-call subset is
+    listed separately below.
   humanURL: https://madeonsol.com/api-docs
-  baseURL: https://madeonsol.com
+  baseURL: https://madeonsol.com/api/v1
   aid: madeonsol:madeonsol-api
+  tags:
+  - Solana
+  - Robinhood Chain
+  properties:
+  - type: OpenAPI
+    url: https://madeonsol.com/api/v1/openapi.json
+  - type: OpenAPI
+    url: https://madeonsol.com/api/v1/rhc/openapi.json
+  - type: PostmanCollection
+    url: https://madeonsol.com/api/v1/postman.json
+  - type: AsyncAPI
+    url: https://madeonsol.com/api/v1/asyncapi.json
+  - type: Documentation
+    url: https://madeonsol.com/api-docs
 - aid: madeonsol:madeonsol-robinhood-chain-api
   name: MadeOnSol Robinhood Chain API
-  description: The Robinhood Chain API from MadeOnSol — 10 operation(s) for robinhood chain.
+  description: Keyless x402 pay-per-call subset of the MadeOnSol API for Robinhood Chain (USDG on Robinhood Chain or USDC on Solana). The full keyed API is described by https://madeonsol.com/api/v1/openapi.json.
   humanURL: https://madeonsol.com/api-docs
   tags:
   - Robinhood Chain
@@ -108,7 +138,7 @@ apis:
     url: openapi/madeonsol-robinhood-chain-api-openapi.yml
 - aid: madeonsol:madeonsol-solana-api
   name: MadeOnSol Solana API
-  description: The Solana API from MadeOnSol — 25 operation(s) for solana.
+  description: Keyless x402 pay-per-call subset of the MadeOnSol API for Solana (USDC). The full keyed API is described by https://madeonsol.com/api/v1/openapi.json.
   humanURL: https://madeonsol.com/api-docs
   tags:
   - Solana
