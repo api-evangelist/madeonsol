@@ -1,0 +1,1054 @@
+openapi: 3.2.0
+info:
+  title: MadeOnSol Sniper API
+  version: 1.20.0
+  description: Real-time Solana & Robinhood Chain trading intelligence — KOL wallet trades, deployer reputation, token buyer-quality scoring, wallet tracking, and copy-trade signals across both chains (Robinhood Chain paths under `/rhc/*`).
+  contact:
+    name: MadeOnSol
+    url: https://madeonsol.com/contact
+  license:
+    name: Proprietary
+    url: https://madeonsol.com/terms
+servers:
+- url: https://madeonsol.com/api/v1
+  description: Production
+security:
+- BearerAuth: []
+tags:
+- name: Sniper
+  description: Pre-confirmation pump.fun deploy detection — recent deploys, by-deployer feed, custom watchlist. PRO+ (curated to elite/good deployers); ULTRA gets every tier + watchlist + by-deployer.
+paths:
+  /sniper/recent:
+    get:
+      tags:
+      - Sniper
+      summary: Recent pre-confirm pump.fun deploys (Pro + Ultra)
+      description: 'Newest-first list of pump.fun token deploys detected via Yellowstone SubscribeDeshred. Deploys land in this feed a median ~290ms before the chain confirms them (measured head start vs CONFIRMED-stream alerts: 24 h to 2026-09-20, n = 37,957 reconciled deploys, p10 160ms / p90 401ms; the confirmed stream is first on ~3.4% of launches). Payload carries mint + deployer + signature + slot + deployer enrichment snapshot (tier, bond_rate, recent_outcomes). For live alerts use the `sniper:deploy` webhook event or the `sniper:deploys` WebSocket channel; this endpoint is for backtesting / catch-up after a gap. PRO + ULTRA — PRO is curated to elite/good-tier deployers; ULTRA sees every tier.'
+      parameters:
+      - name: since
+        in: query
+        schema:
+          type: string
+          format: date-time
+        description: Only deploys detected after this timestamp
+      - name: deployer_tier
+        in: query
+        schema:
+          type: string
+          enum:
+          - elite
+          - good
+          - moderate
+          - rising
+          - cold
+          - unranked
+        description: Filter by deployer reputation tier
+      - name: min_bond_rate
+        in: query
+        schema:
+          type: number
+          minimum: 0
+          maximum: 1
+        description: Minimum deployer lifetime bond rate (e.g. 0.5 = 50%)
+      - name: watchlist
+        in: query
+        schema:
+          type: boolean
+          default: false
+        description: 'ULTRA only: `true` narrows the feed to deployers on your custom sniper watchlist (any tier, overrides the tier scope). On PRO a 403. An empty watchlist answers `{ deploys: [], count: 0, watchlist_empty: true }`.'
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 50
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deploys:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        mint:
+                          type: string
+                          description: Token mint address. Legacy pump.fun launches end with 'pump'; CreateV2 / Token-2022 launches carry no suffix — never key on the suffix.
+                        name:
+                          type: string
+                          nullable: true
+                        symbol:
+                          type: string
+                          nullable: true
+                        deployer_wallet:
+                          type: string
+                        signature:
+                          type: string
+                          description: Solana tx signature
+                        slot:
+                          type: integer
+                          format: int64
+                        detected_at:
+                          type: string
+                          format: date-time
+                        detection_region:
+                          type: string
+                          enum:
+                          - Frankfurt
+                          - New York
+                        detection_confirmed:
+                          type: boolean
+                          description: True if the OTHER region also delivered this mint (rare due to LRU dedup — Frankfurt usually wins)
+                        deployer_tier:
+                          type: string
+                          nullable: true
+                          enum:
+                          - elite
+                          - good
+                          - moderate
+                          - rising
+                          - cold
+                          - unranked
+                        deployer_bond_rate:
+                          type: number
+                          nullable: true
+                          description: Lifetime bond rate, 0-1
+                        deployer_total_bonded:
+                          type: integer
+                          nullable: true
+                        deployer_recent:
+                          type: string
+                          nullable: true
+                          description: Last-10 outcome bitmap (e.g. 'BBBBBFBBB' = 9 of 10 bonded)
+                        deployer_runner_rate:
+                          type: number
+                          nullable: true
+                          description: Fraction of the deployer's labeled tokens that ran (peak >=60min after deploy). As-of predictor of this deploy's runner odds; gate on deployer_labeled_tokens>=3.
+                        deployer_labeled_tokens:
+                          type: integer
+                          nullable: true
+                          description: Count of the deployer's labeled tokens (runner+dump) backing deployer_runner_rate — the confidence denominator.
+                        confirmed_on_chain:
+                          type: boolean
+                          nullable: true
+                          description: Filled by the reconciler — null while pending
+                        confirmed_at:
+                          type: string
+                          format: date-time
+                          nullable: true
+                        attribution_status:
+                          type: string
+                          enum:
+                          - unverified
+                          - confirmed
+                          - corrected
+                          description: 'Deployer attribution cross-checked against the confirmed create tx (every 15 min): unverified until checked, confirmed when the deshred read matched, corrected when the deployer/mint was fixed from the confirmed tx. Distinct from detection_confirmed (transport-level).'
+                        attribution_checked_at:
+                          type: string
+                          format: date-time
+                          nullable: true
+                          description: When the attribution cross-check last ran for this deploy; null while unverified.
+                        footprint:
+                          type: object
+                          nullable: true
+                          description: Slot-window snipe rollup (slots deploy−1 to deploy+3). null = not computed yet (deploys younger than the ~10-min settle window, or outside the trade write-gate) — absent, not zero.
+                          properties:
+                            buys:
+                              type: integer
+                              nullable: true
+                              description: Buy count in the slot window.
+                            buyers:
+                              type: integer
+                              nullable: true
+                              description: Distinct buying wallets in the slot window.
+                            sol:
+                              type: number
+                              nullable: true
+                              description: SOL spent in the slot window.
+                            supply_pct:
+                              type: number
+                              nullable: true
+                              description: Share of supply bought in the slot window (%).
+                            sniper_wallet_buys:
+                              type: integer
+                              nullable: true
+                              description: Of those buys, how many came from wallets on the sniper list.
+                            data_available:
+                              type: boolean
+                              nullable: true
+                              description: false = the window had no captured trades; treat zeros as unknown.
+                            as_of:
+                              type: string
+                              format: date-time
+                              nullable: true
+                  count:
+                    type: integer
+                  data_age_seconds:
+                    type: integer
+                    nullable: true
+                    description: Seconds since the newest returned row's detected_at
+                  watchlist_empty:
+                    type: boolean
+                    description: Present (true) only with `watchlist=true` when your watchlist has no deployers — the empty page is then not a data gap.
+                  coverage:
+                    $ref: '#/components/schemas/LaunchCoverage'
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: PRO or ULTRA subscription required
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: PRO
+      x-badges:
+      - name: PRO
+        position: after
+        color: '#1d4ed8'
+      x-madeonsol-feature-tiers:
+      - tier: ULTRA
+        feature: Custom watchlist filtering
+      operationId: getSniperRecent
+      x-operation-id-source: derived
+  /sniper/by-deployer/{wallet}:
+    get:
+      tags:
+      - Sniper
+      summary: Recent deploys for a specific deployer (Ultra)
+      description: Pre-confirm deploys filtered to a single deployer wallet. Useful for auditing a deployer's recent track record before adding them to a custom watchlist. Same payload shape as `/sniper/recent`. ULTRA only.
+      parameters:
+      - name: wallet
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 32
+          maxLength: 44
+          example: 8oZiaf74SwU9YufXNWHHZj6kih6RrqaZ3T38exYD27jw
+        description: Deployer wallet (base58, 32-44 chars)
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 50
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  coverage:
+                    $ref: '#/components/schemas/LaunchCoverage'
+                  deployer:
+                    type: string
+                  deploys:
+                    type: array
+                    items:
+                      type: object
+                  count:
+                    type: integer
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '400':
+          description: Invalid deployer wallet format
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: ULTRA subscription required
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: ULTRA
+      x-badges:
+      - name: ULTRA
+        position: after
+        color: '#b45309'
+      operationId: getSniperByDeployerByWallet
+      x-operation-id-source: derived
+  /sniper/watchlist:
+    get:
+      tags:
+      - Sniper
+      summary: List custom sniper deployer watchlist (Ultra)
+      description: 'Returns your custom watchlist of deployer wallets. Watchlist scope delivers deploys from these specific deployers regardless of tier — enable it via `?watchlist=true` on `/sniper/recent`, or `sniper_scope: "watchlist"` in a webhook/WS subscription. ULTRA only, max 50 deployers.'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deployers:
+                    type: array
+                    items:
+                      type: object
+                  count:
+                    type: integer
+                  limit:
+                    type: integer
+                  remaining:
+                    type: integer
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: ULTRA subscription required
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: ULTRA
+      x-badges:
+      - name: ULTRA
+        position: after
+        color: '#b45309'
+      operationId: getSniperWatchlist
+      x-operation-id-source: derived
+    post:
+      tags:
+      - Sniper
+      summary: Add deployer(s) to the sniper watchlist (Ultra)
+      description: Add one deployer (`wallet`) or many (`wallets`, max 50) with an optional `label`. Idempotent. ULTRA only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                wallet:
+                  type: string
+                wallets:
+                  type: array
+                  items:
+                    type: string
+                label:
+                  type: string
+      responses:
+        '200':
+          description: Added (or all already present)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  added:
+                    type: integer
+                    description: Number of deployers newly added
+                  deployers:
+                    type: array
+                    items:
+                      type: string
+                    description: Wallet addresses just added — present when added > 0
+                  message:
+                    type: string
+                    description: Present instead of deployers when every requested wallet was already on the watchlist
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '400':
+          description: Invalid body
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: ULTRA subscription required
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Watchlist limit (50) exceeded
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: ULTRA
+      x-badges:
+      - name: ULTRA
+        position: after
+        color: '#b45309'
+      operationId: postSniperWatchlist
+      x-operation-id-source: derived
+  /sniper/watchlist/{wallet}:
+    delete:
+      tags:
+      - Sniper
+      summary: Remove a deployer from the sniper watchlist (Ultra)
+      description: Remove a deployer wallet from your sniper watchlist, addressed by the `wallet` path param (base58, 32–44 chars). ULTRA only. 404 if that deployer isn't on your watchlist.
+      parameters:
+      - name: wallet
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 32
+          maxLength: 44
+          example: 8oZiaf74SwU9YufXNWHHZj6kih6RrqaZ3T38exYD27jw
+      responses:
+        '200':
+          description: Removed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  removed:
+                    type: string
+                    description: The wallet address that was removed
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '400':
+          description: Invalid wallet
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: ULTRA subscription required
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Deployer not in watchlist
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: ULTRA
+      x-badges:
+      - name: ULTRA
+        position: after
+        color: '#b45309'
+      operationId: deleteSniperWatchlistByWallet
+      x-operation-id-source: derived
+components:
+  schemas:
+    ServiceUnavailableError:
+      type: object
+      description: '503: a temporary capacity or maintenance condition (e.g. a Postgres statement timeout during a partition move, or the API-key lookup itself being unavailable). Retry after `Retry-After` seconds.'
+      required:
+      - error
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+          description: Machine-readable code where one exists, e.g. `auth_backend_unavailable`.
+        error_kind:
+          type: string
+          description: e.g. `statement_timeout`, `auth_backend`
+        retry_after_seconds:
+          type: number
+        retryable:
+          type: boolean
+        support:
+          type: string
+        _rid:
+          type: string
+    RateLimitError:
+      type: object
+      description: '429 when a quota is exhausted: the daily quota, the per-minute burst, or a free-tier network/key-rotation cap. `datasets` is added on `daily` only.'
+      required:
+      - error
+      - error_kind
+      - message
+      - tier
+      - limit
+      - resets_at
+      properties:
+        error:
+          type: string
+          enum:
+          - rate_limit_exceeded
+        error_kind:
+          type: string
+          enum:
+          - daily
+          - burst
+          - ip_cap
+          - ip_rotation
+        message:
+          type: string
+        tier:
+          type: string
+          enum:
+          - BASIC
+          - PRO
+          - ULTRA
+          - BUSINESS
+          - ENTERPRISE
+        limit:
+          type: integer
+        resets_at:
+          type: string
+          format: date-time
+        upgrade:
+          type: object
+          description: The plan that lifts this limit, with price and a checkout link.
+          properties:
+            tier:
+              type: string
+              enum:
+              - PRO
+              - ULTRA
+              - BUSINESS
+              - ENTERPRISE
+            price_eur_per_month:
+              type: number
+            price_usdc_per_month:
+              type: number
+            daily_limit:
+              type: integer
+            burst_limit:
+              type: integer
+            pitch:
+              type: string
+            url:
+              type: string
+            upgrade_url:
+              type: string
+              format: uri
+            reactivate:
+              type: boolean
+              description: Present (true) when the key's paid subscription has just lapsed and `tier` is the plan it held.
+            prior_tier:
+              type: string
+              enum:
+              - PRO
+              - ULTRA
+              - BUSINESS
+        datasets:
+          type: object
+          properties:
+            pitch:
+              type: string
+            url:
+              type: string
+              format: uri
+    ConcurrencyLimitError:
+      type: object
+      description: '429 from the heavy-query limiter: too many heavy requests in flight for this key (`concurrency`) or for the whole server (`capacity`). Clears as soon as in-flight requests finish.'
+      required:
+      - error
+      - error_kind
+      - retry_after_seconds
+      properties:
+        error:
+          type: string
+        error_kind:
+          type: string
+          enum:
+          - concurrency
+          - capacity
+        retry_after_seconds:
+          type: number
+        max_concurrent:
+          type: integer
+        support:
+          type: string
+        _rid:
+          type: string
+    Error:
+      type: object
+      description: Generic error envelope. `error` is always present (SDKs match on it). Errors returned after authentication also carry `_rid` and, on paid tiers, `support`; authentication-stage errors (missing/invalid key, origin) carry neither.
+      properties:
+        error:
+          type: string
+          description: Error message or machine code (e.g. `tier_required`, `rate_limit_exceeded`). Never changed once shipped.
+        message:
+          type: string
+          description: Human-readable explanation, when `error` is a machine code.
+        code:
+          type: string
+          description: Machine-readable sub-code on some errors (e.g. `invalid_query`, `invalid_wallet`, `origin_not_allowed`).
+        error_kind:
+          type: string
+          description: Machine-readable category on some errors (e.g. `statement_timeout`, `concurrency`, `daily`).
+        detail:
+          type: string
+          description: Extra human-readable context.
+        hint:
+          type: string
+        retry_after_seconds:
+          type: number
+          description: When present on a 429/503, the same value is sent as the `Retry-After` header.
+        signup_url:
+          type: string
+          format: uri
+          description: 'On the missing-key / bad-format 401: where to get a free key.'
+        docs_url:
+          type: string
+          format: uri
+        support:
+          type: string
+          description: 'Paid tiers, errors after authentication: priority support contact.'
+        _rid:
+          type: string
+          description: Request ID — include when reporting issues
+      required:
+      - error
+    LaunchCoverage:
+      type: object
+      description: 'Dataset-scope disclosure injected on every 200 from the launch-pipeline feeds (`/deployer-hunter/*`, `/sniper/*`, `/alpha/*`, `/tokens/almost-bonded`, `/tokens/batch/risk`, `/wallet/batch/classify`) unless the route already carries a more precise per-subject `coverage`. Static: these datasets are built from launchpad ingest (in practice ~99% pump.fun), so an absent wallet/token, an empty profile or a `false` reputation flag means ''not observed by this pipeline'', never ''clean'' or ''no activity''.'
+      properties:
+        scope:
+          type: string
+          example: launchpad pipeline (pump.fun and LaunchLab/bonk deploys; bags.fm tokens are covered in trade data but their deploys are not attributed here; no direct-to-DEX launches)
+        note:
+          type: string
+          description: How to read absences and zeros in this response.
+  headers:
+    XRateLimitReset:
+      description: When the window resets, as a Unix epoch in SECONDS (next 00:00 UTC for the daily quota; about 60 s ahead for a per-minute bucket).
+      schema:
+        type: integer
+      example: 1791158400
+    XRateLimitRemaining:
+      description: Calls left in that window. `0` on a quota 429.
+      schema:
+        type: integer
+        minimum: 0
+      example: 9412
+    XMadeOnSolQuotaWarning:
+      description: 'Free-tier only, past about 70 % of the daily quota: a human-readable usage line with an upgrade link.'
+      schema:
+        type: string
+      example: '150/200 used - upgrade for 50x higher limits: https://madeonsol.com/checkout?tier=PRO'
+    XRateLimitUsed:
+      description: Calls used in that window (`limit − remaining`).
+      schema:
+        type: integer
+        minimum: 0
+      example: 588
+    XRequestId:
+      description: Unique id of this response. On responses built after authentication it is also the `request_id` of the audit-log row for the call, so quote it in a support request. Present on every response of the keyed API.
+      required: true
+      schema:
+        type: string
+        format: uuid
+      example: 3f6c1d2e-8a4b-4f7e-9c21-5b0d7e6a9f13
+    RetryAfter:
+      description: Seconds to wait before retrying (RFC 9110 delay-seconds, at least 1). Sent on every 429 (quota, concurrency, authentication-failure) and every 503; when the body carries `retry_after_seconds` it is the same value.
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+      example: 10
+    XDataDelay:
+      description: 'Free-tier only: the feed in this body is delayed by this many seconds (same value as the body''s `delay_seconds`). Absent on real-time responses.'
+      schema:
+        type: integer
+        minimum: 1
+      example: 300
+    XRateLimitLimit:
+      description: 'Size of the rate-limit window this call was counted against: the daily quota for your tier on data endpoints, the per-minute bucket on `/stream/token` (10) and `/stream/sessions` (30), the hourly allowance for the public demo key. Sent once the key has been authenticated and rate-limited, so it is absent on authentication-stage errors.'
+      schema:
+        type: integer
+        minimum: 0
+      example: 10000
+  responses:
+    AuthBackendUnavailable:
+      description: 'The API-key or subscription lookup could not be answered (authentication stage). Retryable and not your fault: it is never counted as a failed authentication. Honour `Retry-After`; no `X-RateLimit-*`, no `_rid`.'
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ServiceUnavailableError'
+          examples:
+            auth_backend:
+              summary: API-key lookup unavailable
+              value:
+                error: Authentication temporarily unavailable — please retry.
+                code: auth_backend_unavailable
+                error_kind: auth_backend
+                retryable: true
+                retry_after_seconds: 5
+    InternalError:
+      description: Unexpected server error from the route (`Internal server error`, with `_rid`). Safe to retry with backoff. A failed API-key lookup is a 503 `auth_backend_unavailable`, never a 500.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        X-RateLimit-Limit:
+          $ref: '#/components/headers/XRateLimitLimit'
+        X-RateLimit-Remaining:
+          $ref: '#/components/headers/XRateLimitRemaining'
+        X-RateLimit-Used:
+          $ref: '#/components/headers/XRateLimitUsed'
+        X-RateLimit-Reset:
+          $ref: '#/components/headers/XRateLimitReset'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            route:
+              summary: Route error
+              value:
+                error: Internal server error
+                _rid: eyJ1IjoiZXhhbXBsZSIsInQiOjE3OTEwMDAwMDAwMDAsImgiOiIwMDAwMDAwMCJ9
+    Unauthorized:
+      description: 'Missing or invalid API key, or an expired free-tier key. Authentication-stage error: no `X-RateLimit-*` headers, no `_rid`.'
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            missing_key:
+              summary: No Bearer key
+              value:
+                error: 'Missing authentication — use API key (Authorization: Bearer msk_...)'
+                hint: Get a free API key — 200 calls/day, no payment
+                signup_url: https://madeonsol.com/developer
+                docs_url: https://madeonsol.com/api-docs
+            bad_format:
+              summary: Malformed key
+              value:
+                error: Invalid API key format
+                hint: Get a free API key — 200 calls/day, no payment
+                signup_url: https://madeonsol.com/developer
+                docs_url: https://madeonsol.com/api-docs
+    RateLimited:
+      description: Too many requests. Every 429 carries `Retry-After`. A quota 429 (`rate_limit_exceeded`, with `X-RateLimit-*`), a heavy-query concurrency 429 (`error_kind` `concurrency`/`capacity`), or the per-IP authentication-failure block (30 failed auths/min; plain `error` + `retry_after_seconds`, no `X-RateLimit-*`).
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        X-RateLimit-Limit:
+          $ref: '#/components/headers/XRateLimitLimit'
+        X-RateLimit-Remaining:
+          $ref: '#/components/headers/XRateLimitRemaining'
+        X-RateLimit-Used:
+          $ref: '#/components/headers/XRateLimitUsed'
+        X-RateLimit-Reset:
+          $ref: '#/components/headers/XRateLimitReset'
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/json:
+          schema:
+            anyOf:
+            - $ref: '#/components/schemas/RateLimitError'
+            - $ref: '#/components/schemas/ConcurrencyLimitError'
+            - $ref: '#/components/schemas/Error'
+          examples:
+            daily:
+              summary: Daily quota exhausted
+              value:
+                error: rate_limit_exceeded
+                error_kind: daily
+                message: Daily rate limit exceeded — 200/day for BASIC tier. Resets at midnight UTC.
+                tier: BASIC
+                limit: 200
+                resets_at: '2026-10-05T00:00:00.000Z'
+                upgrade:
+                  tier: PRO
+                  price_eur_per_month: 43
+                  price_usdc_per_month: 49
+                  daily_limit: 10000
+                  burst_limit: 300
+                  pitch: …
+                  url: https://madeonsol.com/pricing
+                  upgrade_url: https://madeonsol.com/checkout?tier=PRO
+                datasets:
+                  pitch: …
+                  url: https://madeonsol.com/datasets
+            concurrency:
+              summary: Too many heavy queries in flight
+              value:
+                error: Too many concurrent heavy queries. Up to 8 of these endpoints may be in flight at once per key — retry in a moment, or lower your request concurrency.
+                error_kind: concurrency
+                retry_after_seconds: 2
+                max_concurrent: 8
+                _rid: eyJ1IjoiZXhhbXBsZSIsInQiOjE3OTEwMDAwMDAwMDAsImgiOiIwMDAwMDAwMCJ9
+            auth_failures:
+              summary: Per-IP authentication-failure block
+              value:
+                error: Too many authentication failures from this IP. Retry in 60s.
+                retry_after_seconds: 42
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: msk_...
+      description: Get a free API key at https://madeonsol.com/developer
+x-madeonsol-tiers:
+- tier: FREE
+  plan: BASIC
+  name: Free
+  price_eur_monthly: 0
+  price_eur_annual: 0
+  price_usd_monthly: 0
+  daily_limit: 200
+  burst_limit: 60
+  url: https://madeonsol.com/developer
+- tier: PRO
+  plan: PRO
+  name: Pro
+  price_eur_monthly: 43
+  price_eur_annual: 430
+  price_usd_monthly: 49
+  daily_limit: 10000
+  burst_limit: 300
+  url: https://madeonsol.com/checkout?tier=PRO
+- tier: ULTRA
+  plan: ULTRA
+  name: Ultra
+  price_eur_monthly: 131
+  price_eur_annual: 1310
+  price_usd_monthly: 149
+  daily_limit: 100000
+  burst_limit: 600
+  url: https://madeonsol.com/checkout?tier=ULTRA
+- tier: BUSINESS
+  plan: BUSINESS
+  name: Business
+  price_eur_monthly: 400
+  price_eur_annual: 4000
+  price_usd_monthly: 456
+  daily_limit: 500000
+  burst_limit: 3000
+  url: https://madeonsol.com/checkout?tier=BUSINESS
+- tier: ENTERPRISE
+  plan: ENTERPRISE
+  name: Enterprise
+  price_eur_monthly: null
+  price_eur_annual: null
+  price_usd_monthly: null
+  daily_limit: null
+  burst_limit: null
+  url: https://madeonsol.com/pricing#enterprise

@@ -1,0 +1,1416 @@
+openapi: 3.2.0
+info:
+  title: MadeOnSol Copy Trade API
+  version: 1.20.0
+  description: Real-time Solana & Robinhood Chain trading intelligence — KOL wallet trades, deployer reputation, token buyer-quality scoring, wallet tracking, and copy-trade signals across both chains (Robinhood Chain paths under `/rhc/*`).
+  contact:
+    name: MadeOnSol
+    url: https://madeonsol.com/contact
+  license:
+    name: Proprietary
+    url: https://madeonsol.com/terms
+servers:
+- url: https://madeonsol.com/api/v1
+  description: Production
+security:
+- BearerAuth: []
+tags:
+- name: Copy-Trade
+  description: Rule-based copy-trade subscriptions (PRO+).
+paths:
+  /copytrade/subscriptions:
+    post:
+      tags:
+      - Copy-Trade
+      summary: Create a copy-trade subscription
+      description: 'Create a rule that mirrors chosen Solana wallets into a signed webhook and/or the `copytrade:signals` WebSocket channel. Which wallets fire depends on the running engine, reported on every rule as `source_admission`: `any_wallet` (production since 2026-10-04) = any valid source wallet, KOL or not, with no Wallet Tracker entry and no Wallet Tracker quota used; `kol_only` (legacy) = only active tracked KOL wallets (the set behind `GET /api/v1/kol/wallets`), other wallets are accepted but never fire. `operational_state` says whether the rule can fire right now. A source trade must be at most 10 s old by chain time or it is not executed. `sizing_amount` is SOL when `sizing_mode=fixed`, otherwise a multiplier of the source trade. Optional `min_mc_usd`/`max_mc_usd` band on the source trade''s market cap — rows with unknown MC are dropped when the band is set, never assumed inside it. Returns `webhook_secret` once, never again. Quotas: PRO 3 rules × 5 wallets · ULTRA 20 × 50 · BUSINESS 100 × 250. PRO+.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - source_wallets
+              - sizing_amount
+              properties:
+                name:
+                  type: string
+                  maxLength: 64
+                source_wallets:
+                  type: array
+                  minItems: 1
+                  maxItems: 250
+                  items:
+                    type: string
+                    description: Base58 Solana wallet
+                  description: Capped further by the tier's per-rule copytrade_wallets quota (PRO 5 / ULTRA 50 / BUSINESS 250), reported by GET /me as features.copytrade_wallets_per_rule.limit.
+                min_trade_sol:
+                  type: number
+                  minimum: 0
+                  default: 0
+                only_action:
+                  type: string
+                  enum:
+                  - buy
+                  - sell
+                  - both
+                  default: buy
+                sizing_mode:
+                  type: string
+                  enum:
+                  - fixed
+                  - proportional
+                  - percent_source
+                  default: fixed
+                sizing_amount:
+                  type: number
+                  exclusiveMinimum: 0
+                delivery_mode:
+                  type: string
+                  enum:
+                  - webhook
+                  - websocket
+                  - both
+                  default: webhook
+                webhook_url:
+                  type: string
+                  format: uri
+                  description: HTTPS only. Required unless delivery_mode is websocket.
+                min_mc_usd:
+                  type: number
+                  minimum: 0
+                  maximum: 1000000000000
+                  nullable: true
+                max_mc_usd:
+                  type: number
+                  minimum: 0
+                  maximum: 1000000000000
+                  nullable: true
+      responses:
+        '200':
+          description: Created — the CopyTradeSubscription row (under `subscription`) plus the one-time webhook_secret
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  subscription:
+                    $ref: '#/components/schemas/CopyTradeSubscription'
+                  webhook_secret:
+                    type: string
+                    nullable: true
+                    description: Shown once; null when delivery_mode is websocket.
+                  note:
+                    type: string
+                  warnings:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        code:
+                          type: string
+                        message:
+                          type: string
+                    description: Mirror of subscription.warnings; present only when something needs attention (e.g. untracked source wallets).
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '400':
+          description: Invalid body, wallet address, webhook URL, or wallet count above the tier cap
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '409':
+          description: Copy-trade rule limit reached for the tier
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: PRO
+      x-badges:
+      - name: PRO
+        position: after
+        color: '#1d4ed8'
+      operationId: postCopytradeSubscriptions
+      x-operation-id-source: derived
+    get:
+      tags:
+      - Copy-Trade
+      summary: List copy-trade subscriptions
+      description: 'Your rule-based copy-trade subscriptions. Each subscription posts a signed webhook and/or a `copytrade:signals` WebSocket event (PRO+) on every matching trade. PRO: 3 rules × 5 wallets. ULTRA: 20 × 50. BUSINESS: 100 × 250.'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  subscriptions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CopyTradeSubscription'
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: PRO
+      x-badges:
+      - name: PRO
+        position: after
+        color: '#1d4ed8'
+      operationId: getCopytradeSubscriptions
+      x-operation-id-source: derived
+  /copytrade/signals:
+    get:
+      tags:
+      - Copy-Trade
+      summary: List matched copy-trade signals
+      description: 'Signals matched against your copy-trade subscription rules, newest first. Filter by subscription and time window. The market-cap band (min_mc_usd / max_mc_usd) is applied BEFORE limit and cursor (since 2026-10-05): limit=N returns up to N matching signals, and paging with cursor= (the next_cursor of the previous page) neither skips nor repeats matches. With a band set, `scan` reports the bounded scan: has_more is false only when your signals ran out, and scan_truncated=true means the per-request budget ran out first (more matches MAY exist past next_cursor). PRO/ULTRA only.'
+      parameters:
+      - name: subscription_id
+        in: query
+        schema:
+          type: integer
+        description: Filter to one of your subscriptions' signals (the integer id from /copytrade/subscriptions)
+      - name: since
+        in: query
+        schema:
+          type: string
+        description: Only signals after this ISO timestamp
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 50
+        description: Maximum signals returned. With a market-cap band, up to `limit` MATCHING signals (the band is applied before the limit).
+      - name: cursor
+        in: query
+        schema:
+          type: string
+          maxLength: 200
+        description: 'PREFERRED pagination (audit F09 follow-up): the `next_cursor` from a previous page — an opaque strict (fired_at, id) keyset, so paging never repeats or skips rows that share a sort value and progresses with limit=1 through runs of identical timestamps. Malformed or tampered → 400.'
+      - name: min_mc_usd
+        in: query
+        schema:
+          type: number
+        description: Entry market-cap (USD) lower bound, on market_cap_usd_at_trade. Applied before limit and cursor. A signal whose at-trade MC is unknown (null) is excluded when either bound is set (same as /kol/feed); omit both bounds to see every signal.
+      - name: max_mc_usd
+        in: query
+        schema:
+          type: number
+        description: Entry market-cap (USD) upper bound, on market_cap_usd_at_trade. Applied before limit and cursor. Unknown (null) at-trade MC is excluded when either bound is set.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  signals:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: integer
+                        subscription_id:
+                          type: integer
+                        fired_at:
+                          type: string
+                          format: date-time
+                        source_wallet:
+                          type: string
+                        action:
+                          type: string
+                          enum:
+                          - buy
+                          - sell
+                        token_mint:
+                          type: string
+                        token_symbol:
+                          type: string
+                          nullable: true
+                        token_name:
+                          type: string
+                          nullable: true
+                        source_sol_amount:
+                          type: number
+                          nullable: true
+                          description: SOL size of the source wallet's trade
+                        suggested_sol_amount:
+                          type: number
+                          nullable: true
+                          description: Sized suggestion per this subscription's sizing_mode
+                        tx_signature:
+                          type: string
+                        delivered:
+                          type: boolean
+                          description: True once the signal was actually written to one of your live sockets or accepted by your webhook. A frame that was only queued for a socket still running a replay and then dropped (queue overflow or a 4008 close) is NOT delivered and records delivery_error 'ws_replay_dropped'.
+                        delivered_at:
+                          type: string
+                          format: date-time
+                          nullable: true
+                        market_cap_usd_at_trade:
+                          type: number
+                          nullable: true
+                          description: Market cap (USD) of the source trade when the signal fired, for any source wallet (KOL or not). Stored on the signal at fire time since 2026-10-04; older signals read it from the source KOL trade. null = unknown (no price at fire time).
+                        price_usd_at_trade:
+                          type: number
+                          nullable: true
+                          description: Token price (USD) of the source trade when the signal fired; same source and null rule as market_cap_usd_at_trade.
+                        market_cap_usd:
+                          type: number
+                          nullable: true
+                          description: Live token market cap, for comparing against market_cap_usd_at_trade
+                        last_price_usd:
+                          type: number
+                          nullable: true
+                        mc_change_pct:
+                          type: object
+                          description: MC % change per lookback window (5m/15m/1h/2h/4h), only for windows with enough history
+                          nullable: true
+                        volume_usd:
+                          type: object
+                          description: Organic volume per lookback window
+                          nullable: true
+                        mev_volume_pct:
+                          type: object
+                          description: MEV/bot volume share per lookback window
+                          nullable: true
+                        history_age_seconds:
+                          type: integer
+                          nullable: true
+                  next_cursor:
+                    type: string
+                    nullable: true
+                    description: Opaque keyset cursor for the next (older) page — pass as `cursor=`. null = end of feed. PREFERRED over the strict-timestamp legacy cursor, which skips same-timestamp siblings of the boundary row.
+                  has_more:
+                    type: boolean
+                    description: false only when the candidate feed is exhausted (not merely when the page is short).
+                  scan:
+                    type: object
+                    description: 'Present when a filter had to be applied after the candidate fetch (audit F09): has_more is then false only when the candidates ran out, and scan_truncated=true means the per-request scan budget ran out first — more matches MAY exist past next_cursor.'
+                    properties:
+                      post_filtered:
+                        type: boolean
+                      scanned:
+                        type: integer
+                        description: Candidate rows examined
+                      scan_truncated:
+                        type: boolean
+                        description: The per-request scan budget ran out before `limit` matches — more matches MAY exist past the cursor/offset
+                      scan_budget:
+                        type: integer
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '400':
+          description: Invalid limit, since, cursor or market-cap bound
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: PRO
+      x-badges:
+      - name: PRO
+        position: after
+        color: '#1d4ed8'
+      operationId: getCopytradeSignals
+      x-operation-id-source: derived
+  /copytrade/subscriptions/{id}:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+        example: 1234
+      description: Numeric subscription ID
+    get:
+      tags:
+      - Copy-Trade
+      summary: Fetch one copy-trade subscription
+      description: Fetch one copy-trade subscription you own, addressed by the numeric `id` path param (integer). Returns its source wallets, sizing & delivery config, MC bounds, and `is_active` state. PRO+; 404 if the id isn't yours.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  subscription:
+                    $ref: '#/components/schemas/CopytradeSubscription'
+                  warnings:
+                    $ref: '#/components/schemas/RhcCopytradeRuleWarnings'
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '404':
+          description: Not found
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: PRO
+      x-badges:
+      - name: PRO
+        position: after
+        color: '#1d4ed8'
+      operationId: getCopytradeSubscriptionsById
+      x-operation-id-source: derived
+    patch:
+      tags:
+      - Copy-Trade
+      summary: Update a copy-trade subscription
+      description: 'Patchable: name, source_wallets, min_trade_sol, only_action, sizing_mode, sizing_amount, delivery_mode, webhook_url, min_mc_usd, max_mc_usd, is_active. MC band: the effective band (this PATCH''s bound plus the stored other bound) must satisfy min_mc_usd <= max_mc_usd, else 400. Setting webhook_url on a rule that has no signing secret mints one and returns it ONCE as webhook_secret (+ note); an existing secret is never rotated or echoed.'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  subscription:
+                    $ref: '#/components/schemas/CopytradeSubscription'
+                  warnings:
+                    $ref: '#/components/schemas/RhcCopytradeRuleWarnings'
+                  webhook_secret:
+                    type: string
+                    description: 'Present ONLY when this PATCH set a webhook_url on a rule without a signing secret: the newly minted secret, shown once. Absent otherwise.'
+                  note:
+                    type: string
+                    description: 'Present with webhook_secret: how to store and verify it.'
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '400':
+          description: Invalid body, e.g. min_mc_usd > max_mc_usd (checked against the stored other bound), over the tier's per-rule wallet limit, or an invalid webhook_url
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: min_mc_usd must be <= max_mc_usd (the rule's stored max_mc_usd is 1000; send both bounds or clear the other with null)
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '404':
+          description: Not found
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: PRO
+      x-badges:
+      - name: PRO
+        position: after
+        color: '#1d4ed8'
+      operationId: patchCopytradeSubscriptionsById
+      x-operation-id-source: derived
+    delete:
+      tags:
+      - Copy-Trade
+      summary: Delete a copy-trade subscription
+      description: Permanently delete a copy-trade subscription you own, addressed by the numeric `id` path param (integer). Stops further matched signals from that rule. 404 if the id isn't yours.
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted:
+                    type: boolean
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '404':
+          description: Not found
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: PRO
+      x-badges:
+      - name: PRO
+        position: after
+        color: '#1d4ed8'
+      operationId: deleteCopytradeSubscriptionsById
+      x-operation-id-source: derived
+components:
+  headers:
+    XRateLimitReset:
+      description: When the window resets, as a Unix epoch in SECONDS (next 00:00 UTC for the daily quota; about 60 s ahead for a per-minute bucket).
+      schema:
+        type: integer
+      example: 1791158400
+    XRateLimitRemaining:
+      description: Calls left in that window. `0` on a quota 429.
+      schema:
+        type: integer
+        minimum: 0
+      example: 9412
+    XDataDelay:
+      description: 'Free-tier only: the feed in this body is delayed by this many seconds (same value as the body''s `delay_seconds`). Absent on real-time responses.'
+      schema:
+        type: integer
+        minimum: 1
+      example: 300
+    XRateLimitLimit:
+      description: 'Size of the rate-limit window this call was counted against: the daily quota for your tier on data endpoints, the per-minute bucket on `/stream/token` (10) and `/stream/sessions` (30), the hourly allowance for the public demo key. Sent once the key has been authenticated and rate-limited, so it is absent on authentication-stage errors.'
+      schema:
+        type: integer
+        minimum: 0
+      example: 10000
+    XMadeOnSolQuotaWarning:
+      description: 'Free-tier only, past about 70 % of the daily quota: a human-readable usage line with an upgrade link.'
+      schema:
+        type: string
+      example: '150/200 used - upgrade for 50x higher limits: https://madeonsol.com/checkout?tier=PRO'
+    XRequestId:
+      description: Unique id of this response. On responses built after authentication it is also the `request_id` of the audit-log row for the call, so quote it in a support request. Present on every response of the keyed API.
+      required: true
+      schema:
+        type: string
+        format: uuid
+      example: 3f6c1d2e-8a4b-4f7e-9c21-5b0d7e6a9f13
+    XRateLimitUsed:
+      description: Calls used in that window (`limit − remaining`).
+      schema:
+        type: integer
+        minimum: 0
+      example: 588
+    RetryAfter:
+      description: Seconds to wait before retrying (RFC 9110 delay-seconds, at least 1). Sent on every 429 (quota, concurrency, authentication-failure) and every 503; when the body carries `retry_after_seconds` it is the same value.
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+      example: 10
+  schemas:
+    CopyTradeSubscription:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: Numeric rule id (used in /copytrade/subscriptions/{id})
+        name:
+          type: string
+          nullable: true
+        source_wallets:
+          type: array
+          items:
+            type: string
+          description: Base58 wallets being mirrored (1-50)
+        min_trade_sol:
+          type: number
+        only_action:
+          type: string
+          enum:
+          - buy
+          - sell
+          - both
+        sizing_mode:
+          type: string
+          enum:
+          - fixed
+          - proportional
+          - percent_source
+        sizing_amount:
+          type: number
+        delivery_mode:
+          type: string
+          enum:
+          - webhook
+          - websocket
+          - both
+        webhook_url:
+          type: string
+          format: uri
+          nullable: true
+        min_mc_usd:
+          type: number
+          nullable: true
+        max_mc_usd:
+          type: number
+          nullable: true
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        source_wallets_tracked:
+          type: array
+          items:
+            type: string
+          nullable: true
+          description: 'DEPRECATED 2026-10-04 (kept): source wallets that are tracked KOL wallets. Enrichment only under source_admission any_wallet; under kol_only only these can produce a signal. null when the tracking read failed. Since 2026-09-25.'
+        source_wallets_untracked:
+          type: array
+          items:
+            type: string
+          nullable: true
+          description: 'DEPRECATED 2026-10-04 (kept): source wallets that are not tracked KOL wallets. They fire under source_admission any_wallet; under kol_only they never produce a signal.'
+        operational_state:
+          $ref: '#/components/schemas/RhcCopytradeOperationalState'
+        source_admission:
+          $ref: '#/components/schemas/RhcCopytradeSourceAdmission'
+        monitoring_reasons:
+          $ref: '#/components/schemas/RhcCopytradeMonitoringReasons'
+        warnings:
+          type: array
+          items:
+            type: object
+            properties:
+              code:
+                type: string
+              message:
+                type: string
+          description: Present only when something needs attention (untracked source wallets, tracking unavailable).
+    DemoKeyNotAllowedError:
+      type: object
+      description: 403 for the public demo key (`msk_demo_…`) outside its three-endpoint allow-list. `endpoint_tier` is the endpoint's real minimum plan (null when unknown).
+      required:
+      - error
+      - message
+      - allowed_endpoints
+      properties:
+        error:
+          type: string
+          enum:
+          - demo_key_endpoint_not_allowed
+        message:
+          type: string
+        endpoint_tier:
+          type: string
+          nullable: true
+          enum:
+          - FREE
+          - PRO
+          - ULTRA
+          - BUSINESS
+          - ENTERPRISE
+          - null
+        allowed_endpoints:
+          type: array
+          items:
+            type: string
+        signup_url:
+          type: string
+          format: uri
+        upgrade_url:
+          type: string
+          format: uri
+          description: Only when the endpoint's tier can be bought at /checkout.
+    ConcurrencyLimitError:
+      type: object
+      description: '429 from the heavy-query limiter: too many heavy requests in flight for this key (`concurrency`) or for the whole server (`capacity`). Clears as soon as in-flight requests finish.'
+      required:
+      - error
+      - error_kind
+      - retry_after_seconds
+      properties:
+        error:
+          type: string
+        error_kind:
+          type: string
+          enum:
+          - concurrency
+          - capacity
+        retry_after_seconds:
+          type: number
+        max_concurrent:
+          type: integer
+        support:
+          type: string
+        _rid:
+          type: string
+    RhcCopytradeMonitoringReasons:
+      type: array
+      items:
+        type: string
+      description: 'Present only with operational_state monitoring_unavailable: the infrastructure reasons (e.g. dex_stream_stale, trade_stream_stale, source_producer_stale, map_stale, bus_disconnected, engine_state_stale). Added 2026-10-04.'
+    TierRequiredError:
+      type: object
+      description: 403 when the key's tier is below the endpoint's (or a parameter's) gate. `required_tier` matches the operation's `x-madeonsol-tier` or `x-madeonsol-feature-tiers`. ENTERPRISE gates return `contact` instead of `upgrade`.
+      required:
+      - error
+      - message
+      - your_tier
+      - required_tier
+      properties:
+        error:
+          type: string
+          enum:
+          - tier_required
+        message:
+          type: string
+        feature:
+          type: string
+        your_tier:
+          type: string
+          enum:
+          - BASIC
+          - PRO
+          - ULTRA
+          - BUSINESS
+          - ENTERPRISE
+        required_tier:
+          type: string
+          enum:
+          - PRO
+          - ULTRA
+          - BUSINESS
+          - ENTERPRISE
+        upgrade:
+          type: object
+          description: The plan that lifts this limit, with price and a checkout link.
+          properties:
+            tier:
+              type: string
+              enum:
+              - PRO
+              - ULTRA
+              - BUSINESS
+              - ENTERPRISE
+            price_eur_per_month:
+              type: number
+            price_usdc_per_month:
+              type: number
+            daily_limit:
+              type: integer
+            burst_limit:
+              type: integer
+            pitch:
+              type: string
+            url:
+              type: string
+            upgrade_url:
+              type: string
+              format: uri
+            reactivate:
+              type: boolean
+              description: Present (true) when the key's paid subscription has just lapsed and `tier` is the plan it held.
+            prior_tier:
+              type: string
+              enum:
+              - PRO
+              - ULTRA
+              - BUSINESS
+        contact:
+          type: object
+          properties:
+            url:
+              type: string
+            contact_url:
+              type: string
+            pitch:
+              type: string
+        support:
+          type: string
+        _rid:
+          type: string
+    RhcCopytradeSourceAdmission:
+      type: string
+      enum:
+      - kol_only
+      - any_wallet
+      description: 'Which trades the RUNNING copy-trade engine admits (shared by the Solana and Robinhood Chain rules). any_wallet: a qualifying trade by any source wallet, KOL or not (Robinhood Chain: the ERC-4337 userOp sender on bundled transactions; Solana: the same effective-trader rule as KOL attribution). kol_only: only tracked KOL wallets (kol_evm_wallets / active kol_wallets), legacy. Absent when the engine state could not be read (legacy semantics). Added 2026-10-04.'
+    ServiceUnavailableError:
+      type: object
+      description: '503: a temporary capacity or maintenance condition (e.g. a Postgres statement timeout during a partition move, or the API-key lookup itself being unavailable). Retry after `Retry-After` seconds.'
+      required:
+      - error
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+          description: Machine-readable code where one exists, e.g. `auth_backend_unavailable`.
+        error_kind:
+          type: string
+          description: e.g. `statement_timeout`, `auth_backend`
+        retry_after_seconds:
+          type: number
+        retryable:
+          type: boolean
+        support:
+          type: string
+        _rid:
+          type: string
+    RhcCopytradeRuleWarnings:
+      type: array
+      description: Present only when something needs attention (the key is omitted otherwise, never null). Additive — status codes and existing fields never change. Emitted only under source_admission kol_only (legacy); under any_wallet an untracked wallet is not a problem and no warning is attached.
+      items:
+        type: object
+        required:
+        - code
+        - message
+        properties:
+          code:
+            type: string
+            enum:
+            - untracked_source_wallets
+            - source_wallet_tracking_unavailable
+          message:
+            type: string
+    CopytradeSubscription:
+      type: object
+      description: 'A copy-trade rule: source wallets to mirror, sizing, delivery, and optional MC bounds.'
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+          nullable: true
+        source_wallets:
+          type: array
+          items:
+            type: string
+          description: Wallets being copied. Any valid Solana wallet once source_admission is any_wallet; under the legacy kol_only engine only active tracked KOL wallets fire — see source_admission and operational_state.
+        min_trade_sol:
+          type: number
+          nullable: true
+          description: Skip source trades below this SOL size
+        only_action:
+          type: string
+          enum:
+          - buy
+          - sell
+          - both
+        sizing_mode:
+          type: string
+          enum:
+          - fixed
+          - proportional
+          - percent_source
+        sizing_amount:
+          type: number
+          description: fixed = SOL amount, proportional = multiplier (0.5 = half size), percent_source = 0..1
+        delivery_mode:
+          type: string
+          enum:
+          - webhook
+          - websocket
+          - both
+        webhook_url:
+          type: string
+          format: uri
+          nullable: true
+        min_mc_usd:
+          type: number
+          nullable: true
+        max_mc_usd:
+          type: number
+          nullable: true
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+          description: GET only
+        updated_at:
+          type: string
+          format: date-time
+        source_wallets_tracked:
+          type: array
+          items:
+            type: string
+          nullable: true
+          description: 'DEPRECATED 2026-10-04 (kept, still filled): subset of source_wallets that are active tracked Solana KOL wallets (the set behind /kol/wallets). KOL enrichment only once source_admission is any_wallet; under the legacy kol_only engine only these produce signals. null when the lookup failed. Added 2026-09-25.'
+        source_wallets_untracked:
+          type: array
+          items:
+            type: string
+          nullable: true
+          description: 'DEPRECATED 2026-10-04 (kept, still filled): subset of source_wallets that are not tracked KOL wallets. Under source_admission any_wallet they fire like any other wallet (no Wallet Tracker entry needed, no Wallet Tracker quota used); under the legacy kol_only engine they never produce a signal. null when the lookup failed. Added 2026-09-25.'
+        operational_state:
+          $ref: '#/components/schemas/RhcCopytradeOperationalState'
+        source_admission:
+          $ref: '#/components/schemas/RhcCopytradeSourceAdmission'
+        monitoring_reasons:
+          $ref: '#/components/schemas/RhcCopytradeMonitoringReasons'
+        warnings:
+          $ref: '#/components/schemas/RhcCopytradeRuleWarnings'
+    RhcCopytradeOperationalState:
+      type: string
+      enum:
+      - eligible
+      - monitoring_pending
+      - monitoring_unavailable
+      - source_capacity_unavailable
+      - no_tracked_sources
+      - unknown
+      description: 'Whether the rule can fire at all, separate from is_active (the customer switch). Under source_admission any_wallet (2026-10-04) every valid source wallet is followed, KOL or not: eligible; monitoring_pending = the rule changed after the engine''s last rule load (live within seconds); monitoring_unavailable = the engine or the trade stream is not reporting, and it fires nothing until it is (see monitoring_reasons); source_capacity_unavailable = the engine''s source-wallet cap is reached. Legacy (source_admission kol_only or absent): no_tracked_sources = none of source_wallets is a tracked KOL wallet (kol_evm_wallets on Robinhood Chain, active kol_wallets on Solana), so the rule cannot fire; unknown = the tracking read failed.'
+    RateLimitError:
+      type: object
+      description: '429 when a quota is exhausted: the daily quota, the per-minute burst, or a free-tier network/key-rotation cap. `datasets` is added on `daily` only.'
+      required:
+      - error
+      - error_kind
+      - message
+      - tier
+      - limit
+      - resets_at
+      properties:
+        error:
+          type: string
+          enum:
+          - rate_limit_exceeded
+        error_kind:
+          type: string
+          enum:
+          - daily
+          - burst
+          - ip_cap
+          - ip_rotation
+        message:
+          type: string
+        tier:
+          type: string
+          enum:
+          - BASIC
+          - PRO
+          - ULTRA
+          - BUSINESS
+          - ENTERPRISE
+        limit:
+          type: integer
+        resets_at:
+          type: string
+          format: date-time
+        upgrade:
+          type: object
+          description: The plan that lifts this limit, with price and a checkout link.
+          properties:
+            tier:
+              type: string
+              enum:
+              - PRO
+              - ULTRA
+              - BUSINESS
+              - ENTERPRISE
+            price_eur_per_month:
+              type: number
+            price_usdc_per_month:
+              type: number
+            daily_limit:
+              type: integer
+            burst_limit:
+              type: integer
+            pitch:
+              type: string
+            url:
+              type: string
+            upgrade_url:
+              type: string
+              format: uri
+            reactivate:
+              type: boolean
+              description: Present (true) when the key's paid subscription has just lapsed and `tier` is the plan it held.
+            prior_tier:
+              type: string
+              enum:
+              - PRO
+              - ULTRA
+              - BUSINESS
+        datasets:
+          type: object
+          properties:
+            pitch:
+              type: string
+            url:
+              type: string
+              format: uri
+    Error:
+      type: object
+      description: Generic error envelope. `error` is always present (SDKs match on it). Errors returned after authentication also carry `_rid` and, on paid tiers, `support`; authentication-stage errors (missing/invalid key, origin) carry neither.
+      properties:
+        error:
+          type: string
+          description: Error message or machine code (e.g. `tier_required`, `rate_limit_exceeded`). Never changed once shipped.
+        message:
+          type: string
+          description: Human-readable explanation, when `error` is a machine code.
+        code:
+          type: string
+          description: Machine-readable sub-code on some errors (e.g. `invalid_query`, `invalid_wallet`, `origin_not_allowed`).
+        error_kind:
+          type: string
+          description: Machine-readable category on some errors (e.g. `statement_timeout`, `concurrency`, `daily`).
+        detail:
+          type: string
+          description: Extra human-readable context.
+        hint:
+          type: string
+        retry_after_seconds:
+          type: number
+          description: When present on a 429/503, the same value is sent as the `Retry-After` header.
+        signup_url:
+          type: string
+          format: uri
+          description: 'On the missing-key / bad-format 401: where to get a free key.'
+        docs_url:
+          type: string
+          format: uri
+        support:
+          type: string
+          description: 'Paid tiers, errors after authentication: priority support contact.'
+        _rid:
+          type: string
+          description: Request ID — include when reporting issues
+      required:
+      - error
+  responses:
+    TierForbidden:
+      description: 'Forbidden. One of: the key''s tier is below this endpoint''s or parameter''s gate (`tier_required` with an `upgrade` block); the public demo key used outside its allow-list (`demo_key_endpoint_not_allowed`); an invalid or revoked key; an origin-restricted key called from a disallowed origin (`code` `origin_not_allowed` / `origin_required`). `X-RateLimit-*` headers are present only on `tier_required`.'
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        X-RateLimit-Limit:
+          $ref: '#/components/headers/XRateLimitLimit'
+        X-RateLimit-Remaining:
+          $ref: '#/components/headers/XRateLimitRemaining'
+        X-RateLimit-Used:
+          $ref: '#/components/headers/XRateLimitUsed'
+        X-RateLimit-Reset:
+          $ref: '#/components/headers/XRateLimitReset'
+      content:
+        application/json:
+          schema:
+            anyOf:
+            - $ref: '#/components/schemas/TierRequiredError'
+            - $ref: '#/components/schemas/DemoKeyNotAllowedError'
+            - $ref: '#/components/schemas/Error'
+          examples:
+            tier_required:
+              summary: Tier below the gate
+              value:
+                error: tier_required
+                message: This endpoint requires ULTRA tier — you're on PRO.
+                feature: This endpoint
+                your_tier: PRO
+                required_tier: ULTRA
+                upgrade:
+                  tier: ULTRA
+                  price_eur_per_month: 131
+                  price_usdc_per_month: 149
+                  daily_limit: 100000
+                  burst_limit: 600
+                  pitch: …
+                  url: https://madeonsol.com/pricing
+                  upgrade_url: https://madeonsol.com/checkout?tier=ULTRA
+                support: 'Priority support: info@madeonsol.com'
+                _rid: eyJ1IjoiZXhhbXBsZSIsInQiOjE3OTEwMDAwMDAwMDAsImgiOiIwMDAwMDAwMCJ9
+            demo_key:
+              summary: Demo key outside its allow-list
+              value:
+                error: demo_key_endpoint_not_allowed
+                message: The public demo key works on /kol/feed, /deployer-hunter/alerts, and /alpha/leaderboard only. This endpoint requires the PRO plan or higher; a free API key will not unlock it. See https://madeonsol.com/pricing.
+                endpoint_tier: PRO
+                allowed_endpoints:
+                - /api/v1/kol/feed
+                - /api/v1/deployer-hunter/alerts
+                - /api/v1/alpha/leaderboard
+                signup_url: https://madeonsol.com/developer
+                upgrade_url: https://madeonsol.com/checkout?tier=PRO
+            revoked_key:
+              summary: Invalid or revoked key
+              value:
+                error: Invalid or revoked API key
+    InternalError:
+      description: Unexpected server error from the route (`Internal server error`, with `_rid`). Safe to retry with backoff. A failed API-key lookup is a 503 `auth_backend_unavailable`, never a 500.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        X-RateLimit-Limit:
+          $ref: '#/components/headers/XRateLimitLimit'
+        X-RateLimit-Remaining:
+          $ref: '#/components/headers/XRateLimitRemaining'
+        X-RateLimit-Used:
+          $ref: '#/components/headers/XRateLimitUsed'
+        X-RateLimit-Reset:
+          $ref: '#/components/headers/XRateLimitReset'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            route:
+              summary: Route error
+              value:
+                error: Internal server error
+                _rid: eyJ1IjoiZXhhbXBsZSIsInQiOjE3OTEwMDAwMDAwMDAsImgiOiIwMDAwMDAwMCJ9
+    RateLimited:
+      description: Too many requests. Every 429 carries `Retry-After`. A quota 429 (`rate_limit_exceeded`, with `X-RateLimit-*`), a heavy-query concurrency 429 (`error_kind` `concurrency`/`capacity`), or the per-IP authentication-failure block (30 failed auths/min; plain `error` + `retry_after_seconds`, no `X-RateLimit-*`).
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        X-RateLimit-Limit:
+          $ref: '#/components/headers/XRateLimitLimit'
+        X-RateLimit-Remaining:
+          $ref: '#/components/headers/XRateLimitRemaining'
+        X-RateLimit-Used:
+          $ref: '#/components/headers/XRateLimitUsed'
+        X-RateLimit-Reset:
+          $ref: '#/components/headers/XRateLimitReset'
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/json:
+          schema:
+            anyOf:
+            - $ref: '#/components/schemas/RateLimitError'
+            - $ref: '#/components/schemas/ConcurrencyLimitError'
+            - $ref: '#/components/schemas/Error'
+          examples:
+            daily:
+              summary: Daily quota exhausted
+              value:
+                error: rate_limit_exceeded
+                error_kind: daily
+                message: Daily rate limit exceeded — 200/day for BASIC tier. Resets at midnight UTC.
+                tier: BASIC
+                limit: 200
+                resets_at: '2026-10-05T00:00:00.000Z'
+                upgrade:
+                  tier: PRO
+                  price_eur_per_month: 43
+                  price_usdc_per_month: 49
+                  daily_limit: 10000
+                  burst_limit: 300
+                  pitch: …
+                  url: https://madeonsol.com/pricing
+                  upgrade_url: https://madeonsol.com/checkout?tier=PRO
+                datasets:
+                  pitch: …
+                  url: https://madeonsol.com/datasets
+            concurrency:
+              summary: Too many heavy queries in flight
+              value:
+                error: Too many concurrent heavy queries. Up to 8 of these endpoints may be in flight at once per key — retry in a moment, or lower your request concurrency.
+                error_kind: concurrency
+                retry_after_seconds: 2
+                max_concurrent: 8
+                _rid: eyJ1IjoiZXhhbXBsZSIsInQiOjE3OTEwMDAwMDAwMDAsImgiOiIwMDAwMDAwMCJ9
+            auth_failures:
+              summary: Per-IP authentication-failure block
+              value:
+                error: Too many authentication failures from this IP. Retry in 60s.
+                retry_after_seconds: 42
+    AuthBackendUnavailable:
+      description: 'The API-key or subscription lookup could not be answered (authentication stage). Retryable and not your fault: it is never counted as a failed authentication. Honour `Retry-After`; no `X-RateLimit-*`, no `_rid`.'
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ServiceUnavailableError'
+          examples:
+            auth_backend:
+              summary: API-key lookup unavailable
+              value:
+                error: Authentication temporarily unavailable — please retry.
+                code: auth_backend_unavailable
+                error_kind: auth_backend
+                retryable: true
+                retry_after_seconds: 5
+    Unauthorized:
+      description: 'Missing or invalid API key, or an expired free-tier key. Authentication-stage error: no `X-RateLimit-*` headers, no `_rid`.'
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            missing_key:
+              summary: No Bearer key
+              value:
+                error: 'Missing authentication — use API key (Authorization: Bearer msk_...)'
+                hint: Get a free API key — 200 calls/day, no payment
+                signup_url: https://madeonsol.com/developer
+                docs_url: https://madeonsol.com/api-docs
+            bad_format:
+              summary: Malformed key
+              value:
+                error: Invalid API key format
+                hint: Get a free API key — 200 calls/day, no payment
+                signup_url: https://madeonsol.com/developer
+                docs_url: https://madeonsol.com/api-docs
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: msk_...
+      description: Get a free API key at https://madeonsol.com/developer
+x-madeonsol-tiers:
+- tier: FREE
+  plan: BASIC
+  name: Free
+  price_eur_monthly: 0
+  price_eur_annual: 0
+  price_usd_monthly: 0
+  daily_limit: 200
+  burst_limit: 60
+  url: https://madeonsol.com/developer
+- tier: PRO
+  plan: PRO
+  name: Pro
+  price_eur_monthly: 43
+  price_eur_annual: 430
+  price_usd_monthly: 49
+  daily_limit: 10000
+  burst_limit: 300
+  url: https://madeonsol.com/checkout?tier=PRO
+- tier: ULTRA
+  plan: ULTRA
+  name: Ultra
+  price_eur_monthly: 131
+  price_eur_annual: 1310
+  price_usd_monthly: 149
+  daily_limit: 100000
+  burst_limit: 600
+  url: https://madeonsol.com/checkout?tier=ULTRA
+- tier: BUSINESS
+  plan: BUSINESS
+  name: Business
+  price_eur_monthly: 400
+  price_eur_annual: 4000
+  price_usd_monthly: 456
+  daily_limit: 500000
+  burst_limit: 3000
+  url: https://madeonsol.com/checkout?tier=BUSINESS
+- tier: ENTERPRISE
+  plan: ENTERPRISE
+  name: Enterprise
+  price_eur_monthly: null
+  price_eur_annual: null
+  price_usd_monthly: null
+  daily_limit: null
+  burst_limit: null
+  url: https://madeonsol.com/pricing#enterprise

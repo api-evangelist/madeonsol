@@ -10,7 +10,7 @@ x-tier: profiled
 x-tier-reason: enrichment pass 2026-09-28 (modular-v1; was harvest)
 specificationVersion: '0.20'
 created: '2026-09-28'
-modified: '2026-09-28'
+modified: '2026-10-05'
 tags:
 - Blockchain
 - Analytics
@@ -80,6 +80,24 @@ common:
   url: security/madeonsol-domain-security.yml
 - type: Website
   url: https://madeonsol.com
+- type: APIsJSON
+  url: https://madeonsol.com/.well-known/apis.json
+- type: APICatalog
+  url: https://madeonsol.com/.well-known/api-catalog
+- type: AsyncAPI
+  url: https://madeonsol.com/api/v1/asyncapi.json
+- type: AgentSkills
+  url: https://madeonsol.com/skills/index.json
+- type: MCPDocumentation
+  url: https://madeonsol.com/mcp
+- type: MCPPackages
+  url: https://madeonsol.com/mcp-packages.json
+- type: AgentsJSON
+  url: https://madeonsol.com/agents.json
+- type: X402
+  url: https://madeonsol.com/.well-known/x402
+- type: LLMsFullTxt
+  url: https://madeonsol.com/llms-full.txt
 - type: Documentation
   url: https://madeonsol.com/api-docs
 - type: Support
@@ -95,31 +113,347 @@ common:
 - type: PrivacyPolicy
   url: https://madeonsol.com/privacy
 apis:
-- name: MadeOnSol API
-  description: >-
-    Pay-per-call on-chain intelligence API for Solana and Robinhood Chain, providing KOL signals, feeds,
-    leaderboards, and token analytics.
+- aid: madeonsol:madeonsol-api
+  name: MadeOnSol API
+  description: The primary keyed MadeOnSol REST API (Bearer msk_ API keys, free and paid tiers), version 1.20.0 with
+    198 operations across Solana and Robinhood Chain (78 Robinhood Chain operations under /rhc/*) - KOL trades and
+    leaderboards, deployer reputation, token and wallet analytics, alerts, copy-trade rules, exports, plus WebSocket
+    streams and HMAC-signed webhooks. The per-area APIs below are this contract split by tag; the keyless x402
+    pay-per-call subsets are listed separately.
   humanURL: https://madeonsol.com/api-docs
-  baseURL: https://madeonsol.com
-  aid: madeonsol:madeonsol-api
+  baseURL: https://madeonsol.com/api/v1
+  version: 1.20.0
+  tags:
+  - Solana
+  - Robinhood Chain
+  properties:
+  - type: OpenAPI
+    name: OpenAPI (provider-hosted)
+    url: https://madeonsol.com/api/v1/openapi.json
+  - type: OpenAPI
+    name: Robinhood Chain keyed view (provider-hosted, subset of the primary contract)
+    url: https://madeonsol.com/api/v1/rhc/openapi.json
+  - type: PostmanCollection
+    url: https://madeonsol.com/api/v1/postman.json
+  - type: AsyncAPI
+    url: https://madeonsol.com/api/v1/asyncapi.json
+  - type: Documentation
+    url: https://madeonsol.com/api-docs
+  - type: APIReference
+    url: https://madeonsol.com/api-reference.md
+  - type: StatusPage
+    url: https://madeonsol.com/api-status
+- aid: madeonsol:madeonsol-account-api
+  name: MadeOnSol Account API
+  description: Self-service account inspection — quota, tier, feature usage. 1 operation(s) of the keyed MadeOnSol API (Bearer
+    msk_ key).
+  humanURL: https://madeonsol.com/api-docs
+  baseURL: https://madeonsol.com/api/v1
+  tags:
+  - Account
+  properties:
+  - type: OpenAPI
+    url: openapi/madeonsol-account-api-openapi.yml
+  - type: OpenAPI
+    name: OpenAPI (provider-hosted)
+    url: https://madeonsol.com/api/v1/openapi.json
+  - type: Documentation
+    url: https://madeonsol.com/api-docs
+- aid: madeonsol:madeonsol-alpha-api
+  name: MadeOnSol Alpha API
+  description: Profitable non-KOL alpha wallets — leaderboard + per-wallet drilldown. 5 operation(s) of the keyed MadeOnSol API
+    (Bearer msk_ key).
+  humanURL: https://madeonsol.com/api-docs
+  baseURL: https://madeonsol.com/api/v1
+  tags:
+  - Alpha
+  properties:
+  - type: OpenAPI
+    url: openapi/madeonsol-alpha-api-openapi.yml
+  - type: OpenAPI
+    name: OpenAPI (provider-hosted)
+    url: https://madeonsol.com/api/v1/openapi.json
+  - type: Documentation
+    url: https://madeonsol.com/api-docs
+- aid: madeonsol:madeonsol-copy-trade-api
+  name: MadeOnSol Copy Trade API
+  description: Rule-based copy-trade subscriptions (PRO+). 6 operation(s) of the keyed MadeOnSol API (Bearer msk_ key).
+  humanURL: https://madeonsol.com/api-docs
+  baseURL: https://madeonsol.com/api/v1
+  tags:
+  - Copy-Trade
+  properties:
+  - type: OpenAPI
+    url: openapi/madeonsol-copy-trade-api-openapi.yml
+  - type: OpenAPI
+    name: OpenAPI (provider-hosted)
+    url: https://madeonsol.com/api/v1/openapi.json
+  - type: Documentation
+    url: https://madeonsol.com/api-docs
+- aid: madeonsol:madeonsol-deployer-hunter-api
+  name: MadeOnSol Deployer Hunter API
+  description: Pump.fun deployer reputation alerts, leaderboard, and per-deployer drilldowns. 13 operation(s) of the keyed MadeOnSol
+    API (Bearer msk_ key).
+  humanURL: https://madeonsol.com/api-docs
+  baseURL: https://madeonsol.com/api/v1
+  tags:
+  - Deployer Hunter
+  properties:
+  - type: OpenAPI
+    url: openapi/madeonsol-deployer-hunter-api-openapi.yml
+  - type: OpenAPI
+    name: OpenAPI (provider-hosted)
+    url: https://madeonsol.com/api/v1/openapi.json
+  - type: Documentation
+    url: https://madeonsol.com/api-docs
+- aid: madeonsol:madeonsol-exports-api
+  name: MadeOnSol Exports API
+  description: Bulk Parquet exports of every fully archived closed month (token_trades, rhc_trades, token_ohlc_1m, rhc_ohlc_1m)
+    via presigned S3 links. BUSINESS+. 1 operation(s) of the keyed MadeOnSol API (Bearer msk_ key).
+  humanURL: https://madeonsol.com/api-docs
+  baseURL: https://madeonsol.com/api/v1
+  tags:
+  - Exports
+  properties:
+  - type: OpenAPI
+    url: openapi/madeonsol-exports-api-openapi.yml
+  - type: OpenAPI
+    name: OpenAPI (provider-hosted)
+    url: https://madeonsol.com/api/v1/openapi.json
+  - type: Documentation
+    url: https://madeonsol.com/api-docs
+- aid: madeonsol:madeonsol-kol-api
+  name: MadeOnSol KOL API
+  description: KOL wallet trade feed, leaderboard, coordination, hot tokens, and per-KOL profile. 29 operation(s) of the keyed
+    MadeOnSol API (Bearer msk_ key).
+  humanURL: https://madeonsol.com/api-docs
+  baseURL: https://madeonsol.com/api/v1
+  tags:
+  - KOL
+  properties:
+  - type: OpenAPI
+    url: openapi/madeonsol-kol-api-openapi.yml
+  - type: OpenAPI
+    name: OpenAPI (provider-hosted)
+    url: https://madeonsol.com/api/v1/openapi.json
+  - type: Documentation
+    url: https://madeonsol.com/api-docs
+- aid: madeonsol:madeonsol-meta-api
+  name: MadeOnSol Meta API
+  description: Nightly dataset manifests — per-dataset fingerprint and schema hash to cite an exact data state. Any key. 1 operation(s)
+    of the keyed MadeOnSol API (Bearer msk_ key).
+  humanURL: https://madeonsol.com/api-docs
+  baseURL: https://madeonsol.com/api/v1
+  tags:
+  - Meta
+  properties:
+  - type: OpenAPI
+    url: openapi/madeonsol-meta-api-openapi.yml
+  - type: OpenAPI
+    name: OpenAPI (provider-hosted)
+    url: https://madeonsol.com/api/v1/openapi.json
+  - type: Documentation
+    url: https://madeonsol.com/api-docs
+- aid: madeonsol:madeonsol-price-alerts-api
+  name: MadeOnSol Price Alerts API
+  description: Token MC dip/recovery alerts, evaluated every 250 ms. PRO+ (PRO 5 / ULTRA 25 / BUSINESS 125 rules). 6 operation(s)
+    of the keyed MadeOnSol API (Bearer msk_ key).
+  humanURL: https://madeonsol.com/api-docs
+  baseURL: https://madeonsol.com/api/v1
+  tags:
+  - Price Alerts
+  properties:
+  - type: OpenAPI
+    url: openapi/madeonsol-price-alerts-api-openapi.yml
+  - type: OpenAPI
+    name: OpenAPI (provider-hosted)
+    url: https://madeonsol.com/api/v1/openapi.json
+  - type: Documentation
+    url: https://madeonsol.com/api-docs
 - aid: madeonsol:madeonsol-robinhood-chain-api
   name: MadeOnSol Robinhood Chain API
-  description: The Robinhood Chain API from MadeOnSol — 10 operation(s) for robinhood chain.
-  humanURL: https://madeonsol.com/api-docs
+  description: Robinhood Chain (chain id 4663) coverage — same intel, EVM-native contracts (0x addresses, eth_amount, tx_hash).
+    Bundled into existing tiers at no extra cost. 78 operation(s) of the keyed MadeOnSol API (Bearer msk_ key).
+  humanURL: https://madeonsol.com/robinhood/api
+  baseURL: https://madeonsol.com/api/v1
   tags:
   - Robinhood Chain
   properties:
   - type: OpenAPI
     url: openapi/madeonsol-robinhood-chain-api-openapi.yml
-- aid: madeonsol:madeonsol-solana-api
-  name: MadeOnSol Solana API
-  description: The Solana API from MadeOnSol — 25 operation(s) for solana.
+  - type: OpenAPI
+    name: OpenAPI (provider-hosted)
+    url: https://madeonsol.com/api/v1/openapi.json
+  - type: Documentation
+    url: https://madeonsol.com/robinhood/api
+- aid: madeonsol:madeonsol-sniper-api
+  name: MadeOnSol Sniper API
+  description: Pre-confirmation pump.fun deploy detection — recent deploys, by-deployer feed, custom watchlist. PRO+ (curated to
+    elite/good deployers); ULTRA gets every tier + watchlist + by-deployer. 5 operation(s) of the keyed MadeOnSol
+    API (Bearer msk_ key).
   humanURL: https://madeonsol.com/api-docs
+  baseURL: https://madeonsol.com/api/v1
   tags:
+  - Sniper
+  properties:
+  - type: OpenAPI
+    url: openapi/madeonsol-sniper-api-openapi.yml
+  - type: OpenAPI
+    name: OpenAPI (provider-hosted)
+    url: https://madeonsol.com/api/v1/openapi.json
+  - type: Documentation
+    url: https://madeonsol.com/api-docs
+- aid: madeonsol:madeonsol-status-api
+  name: MadeOnSol Status API
+  description: Public service health + data-quality status (no auth). 1 operation(s) of the keyed MadeOnSol API (Bearer msk_ key).
+  humanURL: https://madeonsol.com/api-docs
+  baseURL: https://madeonsol.com/api/v1
+  tags:
+  - Status
+  properties:
+  - type: OpenAPI
+    url: openapi/madeonsol-status-api-openapi.yml
+  - type: OpenAPI
+    name: OpenAPI (provider-hosted)
+    url: https://madeonsol.com/api/v1/openapi.json
+  - type: Documentation
+    url: https://madeonsol.com/api-docs
+- aid: madeonsol:madeonsol-streaming-api
+  name: MadeOnSol Streaming API
+  description: WebSocket stream tokens and live session management — 30 channels (16 Solana + 14 Robinhood Chain) on one socket,
+    with seq/id on event frames and resume (memory, then up to 60 minutes of backfill from storage). PRO+. 3 operation(s)
+    of the keyed MadeOnSol API (Bearer msk_ key).
+  humanURL: https://madeonsol.com/api-docs
+  baseURL: https://madeonsol.com/api/v1
+  tags:
+  - Streaming
+  properties:
+  - type: OpenAPI
+    url: openapi/madeonsol-streaming-api-openapi.yml
+  - type: OpenAPI
+    name: OpenAPI (provider-hosted)
+    url: https://madeonsol.com/api/v1/openapi.json
+  - type: Documentation
+    url: https://madeonsol.com/api-docs
+- aid: madeonsol:madeonsol-tokens-api
+  name: MadeOnSol Tokens API
+  description: Token-level buyer-quality, cap-table, and filtered token directory. 26 operation(s) of the keyed MadeOnSol API (Bearer
+    msk_ key).
+  humanURL: https://madeonsol.com/api-docs
+  baseURL: https://madeonsol.com/api/v1
+  tags:
+  - Tokens
+  properties:
+  - type: OpenAPI
+    url: openapi/madeonsol-tokens-api-openapi.yml
+  - type: OpenAPI
+    name: OpenAPI (provider-hosted)
+    url: https://madeonsol.com/api/v1/openapi.json
+  - type: Documentation
+    url: https://madeonsol.com/api-docs
+- aid: madeonsol:madeonsol-tools-api
+  name: MadeOnSol Tools API
+  description: Public Solana & Robinhood Chain tools directory search. 1 operation(s) of the keyed MadeOnSol API (Bearer msk_ key).
+  humanURL: https://madeonsol.com/api-docs
+  baseURL: https://madeonsol.com/api/v1
+  tags:
+  - Tools
+  properties:
+  - type: OpenAPI
+    url: openapi/madeonsol-tools-api-openapi.yml
+  - type: OpenAPI
+    name: OpenAPI (provider-hosted)
+    url: https://madeonsol.com/api/v1/openapi.json
+  - type: Documentation
+    url: https://madeonsol.com/api-docs
+- aid: madeonsol:madeonsol-wallet-api
+  name: MadeOnSol Wallet API
+  description: 'Universal per-wallet endpoints: aggregate stats with cross-product flags, FIFO cost-basis PnL with daily curve,
+    open positions with live unrealized, and cursor-paginated raw trades. PRO+. 10 operation(s) of the keyed MadeOnSol
+    API (Bearer msk_ key).'
+  humanURL: https://madeonsol.com/api-docs
+  baseURL: https://madeonsol.com/api/v1
+  tags:
+  - Wallet
+  properties:
+  - type: OpenAPI
+    url: openapi/madeonsol-wallet-api-openapi.yml
+  - type: OpenAPI
+    name: OpenAPI (provider-hosted)
+    url: https://madeonsol.com/api/v1/openapi.json
+  - type: Documentation
+    url: https://madeonsol.com/api-docs
+- aid: madeonsol:madeonsol-wallet-tracker-api
+  name: MadeOnSol Wallet Tracker API
+  description: Track any Solana wallet — aggregate stats and recent trades. 6 operation(s) of the keyed MadeOnSol API (Bearer msk_
+    key).
+  humanURL: https://madeonsol.com/api-docs
+  baseURL: https://madeonsol.com/api/v1
+  tags:
+  - Wallet Tracker
+  properties:
+  - type: OpenAPI
+    url: openapi/madeonsol-wallet-tracker-api-openapi.yml
+  - type: OpenAPI
+    name: OpenAPI (provider-hosted)
+    url: https://madeonsol.com/api/v1/openapi.json
+  - type: Documentation
+    url: https://madeonsol.com/api-docs
+- aid: madeonsol:madeonsol-webhooks-api
+  name: MadeOnSol Webhooks API
+  description: HMAC-signed webhook registrations for KOL, deployer, wallet-tracker, sniper, token momentum, RHC KOL and realtime
+    developer activity (dev:activity, live since 2026-10-05) events. PRO+. 6 operation(s) of the keyed MadeOnSol API
+    (Bearer msk_ key).
+  humanURL: https://madeonsol.com/api-docs
+  baseURL: https://madeonsol.com/api/v1
+  tags:
+  - Webhooks
+  properties:
+  - type: OpenAPI
+    url: openapi/madeonsol-webhooks-api-openapi.yml
+  - type: OpenAPI
+    name: OpenAPI (provider-hosted)
+    url: https://madeonsol.com/api/v1/openapi.json
+  - type: Documentation
+    url: https://madeonsol.com/api-docs
+- aid: madeonsol:madeonsol-x402-robinhood-chain-api
+  name: MadeOnSol x402 Robinhood Chain API
+  description: 'Keyless x402 pay-per-call subset of MadeOnSol for Robinhood Chain: 10 operations priced per call in USDG on Robinhood
+    Chain (EIP-3009), no API key. A separate, smaller surface than the keyed MadeOnSol API.'
+  humanURL: https://madeonsol.com/robinhood/x402
+  baseURL: https://madeonsol.com/api/x402/rhc
+  tags:
+  - x402
+  - Robinhood Chain
+  properties:
+  - type: OpenAPI
+    url: openapi/madeonsol-x402-robinhood-chain-api-openapi.yml
+  - type: OpenAPI
+    name: OpenAPI (provider-hosted, x402)
+    url: https://madeonsol.com/openapi.json
+  - type: X402
+    url: https://madeonsol.com/.well-known/x402
+  - type: Documentation
+    url: https://madeonsol.com/robinhood/x402
+- aid: madeonsol:madeonsol-x402-solana-api
+  name: MadeOnSol x402 Solana API
+  description: 'Keyless x402 pay-per-call subset of MadeOnSol for Solana: 25 operations priced per call in USDC on Solana, no API
+    key. A separate, smaller surface than the keyed MadeOnSol API.'
+  humanURL: https://madeonsol.com/x402
+  baseURL: https://madeonsol.com/api/x402
+  tags:
+  - x402
   - Solana
   properties:
   - type: OpenAPI
-    url: openapi/madeonsol-solana-api-openapi.yml
+    url: openapi/madeonsol-x402-solana-api-openapi.yml
+  - type: OpenAPI
+    name: OpenAPI (provider-hosted, x402)
+    url: https://madeonsol.com/openapi.json
+  - type: X402
+    url: https://madeonsol.com/.well-known/x402
+  - type: Documentation
+    url: https://madeonsol.com/x402
 x-submission-notes: Emailed directory submission. Onchain intelligence APIs (Solana, Robinhood Chain); SDKs + MCP; x402 pay-per-call. OpenAPI
   https://madeonsol.com/openapi.json, x402 https://madeonsol.com/.well-known/x402
 x-submission-probe: root 200, invented path 404, api-docs 200, OpenAPI 3.1 200 (35 paths), /.well-known/x402 200 json
@@ -130,3 +464,24 @@ x-enrichment:
   artifacts_added: 21
   pass: modular-v1
   engine: identity=local,contract=local,surfaces=local,docs=local,regulatory=local
+x-correction-request:
+  requested: '2026-10-05'
+  source:
+  - https://github.com/api-evangelist/madeonsol/pull/1
+  request: Model the full keyed API (https://madeonsol.com/api/v1/openapi.json, 197 operations, 1.20.0) as the primary
+    contract and the keyless x402 pay-per-call surface (https://madeonsol.com/openapi.json) as separate subsets; add
+    the APIs.json, RFC 9727 API catalog, AsyncAPI, Postman, Agent Skills, MCP package discovery, agents.json and x402
+    discovery documents; refresh packages; re-score.
+  ledger:
+  - madeonsol-ee599794
+  applied: '2026-10-05'
+  applied_note: Applied by hand; every URL verified 200 on 2026-10-05 with a 404 control, and robots.txt now allows
+    crawlers. The provider's own apis.json declares the keyed API primary and the x402 surfaces as subsets, so the
+    profile follows it. Keyed OpenAPI 3.1 (1.20.0, 166 paths / 198 operations - the live document carries one more
+    than the PR's 197) saved verbatim to openapi/_original/madeonsol-api-openapi.json and split into 17 per-tag APIs;
+    the Robinhood Chain keyed view is a subset of it and is recorded as a pointer, not a second contract. The x402
+    OpenAPI (35 operations) was refreshed verbatim in openapi/_original/madeonsol.json and split separately into the
+    x402 Solana (25) and x402 Robinhood Chain (10) APIs, tags prefixed x402 so they do not merge with the keyed
+    Robinhood Chain tag. Discovery documents added to common; packages refreshed from npm, crates.io and PyPI
+    (10 official packages, including both stdio MCP servers). No hosted MCP endpoint is listed, per the provider.
+    The PR was not merged.

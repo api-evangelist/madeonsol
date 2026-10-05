@@ -1,0 +1,3296 @@
+openapi: 3.2.0
+info:
+  title: MadeOnSol Deployer Hunter API
+  version: 1.20.0
+  description: Real-time Solana & Robinhood Chain trading intelligence — KOL wallet trades, deployer reputation, token buyer-quality scoring, wallet tracking, and copy-trade signals across both chains (Robinhood Chain paths under `/rhc/*`).
+  contact:
+    name: MadeOnSol
+    url: https://madeonsol.com/contact
+  license:
+    name: Proprietary
+    url: https://madeonsol.com/terms
+servers:
+- url: https://madeonsol.com/api/v1
+  description: Production
+security:
+- BearerAuth: []
+tags:
+- name: Deployer Hunter
+  description: Pump.fun deployer reputation alerts, leaderboard, and per-deployer drilldowns.
+paths:
+  /deployer-hunter/alerts:
+    get:
+      tags:
+      - Deployer Hunter
+      summary: Pump.fun deployer alerts
+      description: 'New token launches from profiled Pump.fun deployers, enriched with deployer tier, `deployer.best_token_peak_mc`, `deployer.runner_rate` (fraction of the deployer''s labeled tokens that ran — peak >=60min — with `deployer.labeled_tokens` as the confidence denominator; gate on >=3) and `deployer.avg_time_to_bond_minutes`, plus any active KOL buys. Each alert carries `deployer_sol_balance` — the deployer wallet''s SOL balance snapshotted at alert time (SOL; null for rows before 2026-06-21 or on RPC failure). Pagination: `cursor=` (strict (created_at, id) keyset, `next_cursor`) is preferred; `before=` (strict timestamp — skips alerts sharing the boundary created_at) and `offset` stay supported. `kol_buys` is an exact per-mint aggregate (was a page-wide 500-row sample until 2026-09-21), and `min_kol_buys` is served by a bounded scan — see `has_more` / `scan`.'
+      parameters:
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 20
+      - name: since
+        in: query
+        schema:
+          type: string
+          format: date-time
+        description: Only alerts after this ISO timestamp
+      - name: before
+        in: query
+        schema:
+          type: string
+          format: date-time
+        description: 'Cursor: only alerts strictly older than this ISO timestamp. Use `next_before` from the previous response.'
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+        description: Legacy offset pagination. Prefer `cursor` for high-scale polling.
+      - name: cursor
+        in: query
+        schema:
+          type: string
+          maxLength: 200
+        description: 'PREFERRED pagination (audit F09 follow-up): the `next_cursor` from a previous page — an opaque strict (created_at, id) keyset, so paging never repeats or skips rows that share a sort value and progresses with limit=1 through runs of identical timestamps. Malformed or tampered → 400. Cannot be combined with `before=` or `offset=` (400).'
+      - name: tier
+        in: query
+        schema:
+          type: string
+          enum:
+          - elite
+          - good
+          - moderate
+          - rising
+          - cold
+        description: Filter by deployer reputation tier
+      - name: alert_type
+        in: query
+        schema:
+          type: string
+        description: Filter by alert_type (e.g. new_token, bonded, rug_flagged)
+      - name: priority
+        in: query
+        schema:
+          type: string
+          enum:
+          - high
+          - medium
+          - low
+        description: Filter by alert priority
+      - name: min_kol_buys
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+        description: Only alerts where at least N distinct KOLs bought the token (post-filter on kol_buys.count, served by a bounded scan — see `scan`)
+      - name: token_mint
+        in: query
+        schema:
+          type: string
+        description: Scope to one token's alert history — combine with alert_type=bonded to check if/when a specific token bonded
+      responses:
+        '200':
+          description: OK. Includes `next_before` cursor.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  coverage:
+                    $ref: '#/components/schemas/LaunchCoverage'
+                  alerts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        token_mint:
+                          type: string
+                          nullable: true
+                        token_name:
+                          type: string
+                          nullable: true
+                        token_symbol:
+                          type: string
+                          nullable: true
+                        alert_type:
+                          type: string
+                        title:
+                          type: string
+                        message:
+                          type: string
+                        priority:
+                          type: string
+                          enum:
+                          - high
+                          - medium
+                          - low
+                        created_at:
+                          type: string
+                          format: date-time
+                        market_cap_at_alert:
+                          type: number
+                          nullable: true
+                        deployer_sol_balance:
+                          type: number
+                          nullable: true
+                        launchpad:
+                          type: string
+                          nullable: true
+                        deployers:
+                          type: object
+                          nullable: true
+                          description: Joined deployer-reputation row for the alerting wallet.
+                          properties:
+                            wallet_address:
+                              type: string
+                            tier:
+                              type: string
+                              nullable: true
+                            total_tokens_deployed:
+                              type: integer
+                            total_bonded:
+                              type: integer
+                            instant_bonds:
+                              type: integer
+                            bonding_rate:
+                              type: number
+                              nullable: true
+                            recent_outcomes:
+                              type: array
+                              items:
+                                type: boolean
+                              nullable: true
+                            recent_bond_rate:
+                              type: number
+                              nullable: true
+                            best_token_peak_mc:
+                              type: number
+                              nullable: true
+                            runner_rate:
+                              type: number
+                              nullable: true
+                              description: Fraction of labeled tokens that ran (peak ≥60min).
+                            runner_tokens:
+                              type: integer
+                              nullable: true
+                            labeled_tokens:
+                              type: integer
+                              nullable: true
+                              description: Confidence denominator for runner_rate.
+                            avg_time_to_bond_minutes:
+                              type: number
+                              nullable: true
+                        kol_buys:
+                          type: object
+                          nullable: true
+                          description: Post-hoc KOL-buy enrichment on this token, or null if no tracked KOL has bought it.
+                          properties:
+                            count:
+                              type: integer
+                              description: Distinct KOLs who bought
+                            total_sol:
+                              type: number
+                            kols:
+                              type: array
+                              items:
+                                type: string
+                              description: KOL names
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+                  next_before:
+                    type: string
+                    format: date-time
+                    nullable: true
+                    description: 'Legacy cursor — pass as ?before= to fetch older alerts (strict timestamp bound: skips alerts sharing the boundary created_at). Prefer next_cursor.'
+                  next_cursor:
+                    type: string
+                    nullable: true
+                    description: Opaque keyset cursor for the next (older) page — pass as `cursor=`. null = end of feed. PREFERRED over the strict-timestamp legacy cursor, which skips same-timestamp siblings of the boundary row.
+                  has_more:
+                    type: boolean
+                    description: false only when the candidate feed is exhausted (not merely when the page is short).
+                  kol_buys_complete:
+                    type: boolean
+                    description: 'false when the per-mint KOL-buy aggregate could not be read exactly: the pre-migration fallback hit the 1,000-row page clamp (kol_buys counts are lower bounds), or the read failed (kol_buys is null = unknown, not "no KOL buys"; with min_kol_buys the request fails instead).'
+                  scan:
+                    type: object
+                    description: 'Present when a filter had to be applied after the candidate fetch (audit F09): has_more is then false only when the candidates ran out, and scan_truncated=true means the per-request scan budget ran out first — more matches MAY exist past next_cursor.'
+                    properties:
+                      post_filtered:
+                        type: boolean
+                      scanned:
+                        type: integer
+                        description: Candidate rows examined
+                      scan_truncated:
+                        type: boolean
+                        description: The per-request scan budget ran out before `limit` matches — more matches MAY exist past the cursor/offset
+                      scan_budget:
+                        type: integer
+                  data_age_seconds:
+                    type: integer
+                    nullable: true
+                  delay:
+                    type: string
+                    nullable: true
+                    description: BASIC tier only — present when the feed is free-tier delayed, e.g. "5m"
+                  delay_seconds:
+                    type: integer
+                    nullable: true
+                  as_of:
+                    type: string
+                    format: date-time
+                    nullable: true
+                  delay_note:
+                    type: string
+                    nullable: true
+                  upgrade:
+                    type: string
+                    nullable: true
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+      x-madeonsol-tier: FREE
+      x-badges:
+      - name: FREE
+        position: after
+        color: '#64748b'
+      operationId: getDeployerHunterAlerts
+      x-operation-id-source: derived
+  /deployer-hunter/{wallet}:
+    get:
+      tags:
+      - Deployer Hunter
+      summary: Single deployer profile
+      description: Profile for one Pump.fun deployer wallet — tier, bonding rate, total tokens deployed, total bonded count, recent bond rate, best-token peak MC, and `runner_rate` (fraction of labeled tokens that ran, peak >=60min; with `labeled_tokens` confidence denominator) + `avg_time_to_bond_minutes`.
+      parameters:
+      - name: wallet
+        in: path
+        required: true
+        schema:
+          type: string
+          example: 2FxiPRPLYX3H84FZkdRiUHDgDm4U5u98etbL4yvZ3qRq
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  coverage:
+                    $ref: '#/components/schemas/LaunchCoverage'
+                  is_deployer:
+                    type: boolean
+                  wallet:
+                    type: string
+                  deployer:
+                    type: object
+                    nullable: true
+                    description: null when is_deployer is false
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      wallet_address:
+                        type: string
+                      total_tokens_deployed:
+                        type: integer
+                      total_bonded:
+                        type: integer
+                      instant_bonds:
+                        type: integer
+                        nullable: true
+                      bonding_rate:
+                        type: number
+                        nullable: true
+                      recent_bond_rate:
+                        type: number
+                        nullable: true
+                      tier:
+                        type: string
+                        enum:
+                        - elite
+                        - good
+                        - moderate
+                        - rising
+                        - cold
+                        - unranked
+                        nullable: true
+                      is_tracked:
+                        type: boolean
+                      avg_time_to_bond_minutes:
+                        type: number
+                        nullable: true
+                      best_token_peak_mc:
+                        type: number
+                        nullable: true
+                      avg_peak_mc:
+                        type: number
+                        nullable: true
+                      recent_outcomes:
+                        type: object
+                        nullable: true
+                        description: Free-form recent-token outcome summary
+                      runner_rate:
+                        type: number
+                        nullable: true
+                        description: Fraction of labeled tokens that ran (peak >=60min)
+                      runner_tokens:
+                        type: integer
+                        nullable: true
+                      labeled_tokens:
+                        type: integer
+                        nullable: true
+                        description: Confidence denominator for runner_rate
+                      post_bond_survival_rate:
+                        type: number
+                        nullable: true
+                      post_bond_2x_rate:
+                        type: number
+                        nullable: true
+                      post_bond_labeled_count:
+                        type: integer
+                        nullable: true
+                      first_seen_at:
+                        type: string
+                        format: date-time
+                        nullable: true
+                      first_deploy_at:
+                        type: string
+                        format: date-time
+                        nullable: true
+                        description: Earliest deploy observed by MadeOnSol for this wallet (the earliest of our live-ingested creates, bond catch-ups and bonded tokens). Not proof of the wallet's first-ever on-chain launch. Only moves earlier as evidence arrives. Anchor for `funding_features.funding_to_first_deploy_seconds` and `capital_intelligence.launched_at`.
+                      last_deploy_at:
+                        type: string
+                        format: date-time
+                        nullable: true
+                        description: Latest deploy observed by MadeOnSol for this wallet. Only moves later.
+                      last_bond_at:
+                        type: string
+                        format: date-time
+                        nullable: true
+                      label:
+                        type: string
+                        nullable: true
+                  funding:
+                    type: object
+                    description: 'PRO+ only: wallet funding evidence for this deployer, the same block as `/wallet/{address}/funding` (relationships ULTRA+). Absent below PRO.'
+                  funding_features:
+                    type: object
+                    description: 'PRO+ only: flat factual funding features (no score), including the funding to first-deploy gap (`funding_to_first_deploy_seconds`, measured to `deployer.first_deploy_at`; negative when the deploy predates the funding we observed). Absent below PRO.'
+                  capital_intelligence:
+                    type: object
+                    description: 'PRO+ only, when capital intelligence is enabled: capital relationships observed from high-signal source wallets (forward-looking from 2026-09-20). `capital_graph` per source is ULTRA+. Absent below PRO.'
+                    properties:
+                      observed:
+                        type: boolean
+                      note:
+                        type: string
+                        description: Present when observed is false.
+                      pre_launch_sources:
+                        type: integer
+                        description: Sources whose first transfer is strictly before launched_at.
+                      total_sources:
+                        type: integer
+                      launched_at:
+                        type: string
+                        format: date-time
+                        nullable: true
+                        description: = deployer.first_deploy_at (earliest deploy observed by MadeOnSol).
+                      sources:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            source_address:
+                              type: string
+                            explorer_url:
+                              type: string
+                            asset:
+                              type: string
+                            amount:
+                              type: string
+                              nullable: true
+                            amount_raw:
+                              type: string
+                            transfer_count:
+                              type: integer
+                            funded_at:
+                              type: string
+                              format: date-time
+                            last_funded_at:
+                              type: string
+                              format: date-time
+                            funding_to_launch_seconds:
+                              type: integer
+                              nullable: true
+                              description: Seconds from funded_at to launched_at; null unless pre_launch.
+                            pre_launch:
+                              type: boolean
+                              description: funded_at strictly before launched_at.
+                            source_profile_now:
+                              type: object
+                              nullable: true
+                              description: The source's CURRENT MadeOnSol profile, not what was known at transfer time.
+                            capital_graph:
+                              type: object
+                              description: ULTRA+ only.
+                      disclaimer:
+                        type: string
+                  pump_stats:
+                    type: object
+                    nullable: true
+                    description: Aggregated from the live pump.fun API (not our DB); null when is_deployer is false
+                    properties:
+                      total:
+                        type: integer
+                      bonded:
+                        type: integer
+                      bondingRate:
+                        type: number
+                      bestAthMc:
+                        type: number
+                      avgAthMc:
+                        type: number
+                  pump_tokens:
+                    type: array
+                    description: Raw pump.fun API token list (pump.fun-launched tokens only)
+                    items:
+                      type: object
+                      properties:
+                        mint:
+                          type: string
+                        name:
+                          type: string
+                        symbol:
+                          type: string
+                        image_uri:
+                          type: string
+                        creator:
+                          type: string
+                        created_timestamp:
+                          type: integer
+                          description: Unix ms
+                        complete:
+                          type: boolean
+                          description: Bonded/graduated
+                        ath_market_cap:
+                          type: number
+                        usd_market_cap:
+                          type: number
+                        market_cap:
+                          type: number
+                        reply_count:
+                          type: integer
+                        pool_address:
+                          type: string
+                        pump_swap_pool:
+                          type: string
+                  pump_error:
+                    type: boolean
+                    nullable: true
+                    description: true when the live pump.fun API call failed
+                  launchpad_tokens:
+                    type: array
+                    description: Non-pump.fun launchpad tokens (bonk/bags) from our own indexed data — no pre-tracking history
+                    items:
+                      type: object
+                      properties:
+                        mint:
+                          type: string
+                        name:
+                          type: string
+                          nullable: true
+                        symbol:
+                          type: string
+                          nullable: true
+                        launchpad:
+                          type: string
+                          description: e.g. launchlab (bonk), bags
+                        complete:
+                          type: boolean
+                        deployed_at:
+                          type: string
+                          format: date-time
+                        bonded_at:
+                          type: string
+                          format: date-time
+                          nullable: true
+                        peak_market_cap:
+                          type: number
+                          nullable: true
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '404':
+          description: Deployer not tracked
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: FREE
+      x-badges:
+      - name: FREE
+        position: after
+        color: '#64748b'
+      operationId: getDeployerHunterByWallet
+      x-operation-id-source: derived
+  /deployer-hunter/{wallet}/tokens:
+    get:
+      tags:
+      - Deployer Hunter
+      summary: Tokens launched by one deployer
+      description: Paginated list of every token deployed by this wallet, with deployed_at, bonded_at, time-to-bond, peak MC, and MC trajectory snapshots (1h/6h/24h/7d after bond).
+      parameters:
+      - name: wallet
+        in: path
+        required: true
+        schema:
+          type: string
+          example: 2FxiPRPLYX3H84FZkdRiUHDgDm4U5u98etbL4yvZ3qRq
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 20
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+      - name: only_bonded
+        in: query
+        description: true = only tokens that graduated (bonded_at set); total / has_more then count the bonded set. Any value other than true/false is a 400 (invalid_only_bonded).
+        schema:
+          type: boolean
+          default: false
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  coverage:
+                    $ref: '#/components/schemas/LaunchCoverage'
+                  is_deployer:
+                    type: boolean
+                  wallet:
+                    type: string
+                  tokens:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        token_mint:
+                          type: string
+                        token_name:
+                          type: string
+                          nullable: true
+                        token_symbol:
+                          type: string
+                          nullable: true
+                        deployed_at:
+                          type: string
+                          format: date-time
+                        bonded_at:
+                          type: string
+                          format: date-time
+                          nullable: true
+                        time_to_bond_minutes:
+                          type: number
+                          nullable: true
+                        peak_market_cap:
+                          type: number
+                          nullable: true
+                        mc_at_bond:
+                          type: number
+                          nullable: true
+                        market_cap_at_alert:
+                          type: number
+                          nullable: true
+                        alerted_at:
+                          type: string
+                          format: date-time
+                          nullable: true
+                        instant_bond:
+                          type: boolean
+                          description: create → migrate within ~90s (curve filled by a bundle)
+                  total:
+                    type: integer
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+                  has_more:
+                    type: boolean
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: FREE
+      x-badges:
+      - name: FREE
+        position: after
+        color: '#64748b'
+      operationId: getDeployerHunterByWalletTokens
+      x-operation-id-source: derived
+  /deployer-hunter/{wallet}/trajectory:
+    get:
+      tags:
+      - Deployer Hunter
+      summary: Skill curve for one deployer
+      description: Aggregated MC-at-bond and time-to-bond trends over the deployer's launch history. Surfaces whether they're improving or fading.
+      parameters:
+      - name: wallet
+        in: path
+        required: true
+        schema:
+          type: string
+          example: 2FxiPRPLYX3H84FZkdRiUHDgDm4U5u98etbL4yvZ3qRq
+      - name: include
+        in: query
+        schema:
+          type: string
+          enum:
+          - daily_snapshots
+        description: Set to 'daily_snapshots' to include the per-day MC-at-bond / time-to-bond series
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  coverage:
+                    $ref: '#/components/schemas/LaunchCoverage'
+                  is_deployer:
+                    type: boolean
+                    nullable: true
+                    description: Only present (false) for untracked wallets; omitted otherwise
+                  wallet:
+                    type: string
+                    description: Echo of the requested wallet — only on the is_deployer:false body
+                  deployer:
+                    type: object
+                    nullable: true
+                    description: null when the wallet isn't a tracked deployer
+                    properties:
+                      wallet_address:
+                        type: string
+                      total_tokens_deployed:
+                        type: integer
+                      total_bonded:
+                        type: integer
+                      bonding_rate:
+                        type: number
+                        nullable: true
+                      recent_bond_rate:
+                        type: number
+                        nullable: true
+                      tier:
+                        type: string
+                        enum:
+                        - elite
+                        - good
+                        - moderate
+                        - rising
+                        - cold
+                        nullable: true
+                  trajectory:
+                    type: object
+                    nullable: true
+                    description: null when the wallet isn't a tracked deployer
+                    properties:
+                      current_streak:
+                        type: object
+                        properties:
+                          type:
+                            type: string
+                            enum:
+                            - bond
+                            - fail
+                            - none
+                          count:
+                            type: integer
+                      longest_bond_streak:
+                        type: integer
+                      longest_fail_streak:
+                        type: integer
+                      rolling_bond_rates:
+                        type: array
+                        description: Rolling 10-token bond-rate windows
+                        items:
+                          type: object
+                          properties:
+                            window_end:
+                              type: integer
+                            bond_rate:
+                              type: number
+                      trend:
+                        type: string
+                        enum:
+                        - improving
+                        - declining
+                        - stable
+                      avg_days_between_deploys:
+                        type: number
+                        nullable: true
+                      avg_recovery_tokens:
+                        type: number
+                        nullable: true
+                        description: Avg tokens between a fail streak and the next bond
+                      best_stretch:
+                        type: object
+                        nullable: true
+                        properties:
+                          start_index:
+                            type: integer
+                          end_index:
+                            type: integer
+                          bond_rate:
+                            type: number
+                      worst_stretch:
+                        type: object
+                        nullable: true
+                        properties:
+                          start_index:
+                            type: integer
+                          end_index:
+                            type: integer
+                          bond_rate:
+                            type: number
+                      total_tokens_analyzed:
+                        type: integer
+                  daily_snapshots:
+                    type: array
+                    description: Only present when include=daily_snapshots
+                    items:
+                      type: object
+                      properties:
+                        snapshot_date:
+                          type: string
+                          format: date
+                        tier:
+                          type: string
+                          nullable: true
+                        total_tokens_deployed:
+                          type: integer
+                        total_bonded:
+                          type: integer
+                        bonding_rate:
+                          type: number
+                          nullable: true
+                        recent_bond_rate:
+                          type: number
+                          nullable: true
+                        avg_peak_mc:
+                          type: number
+                          nullable: true
+                        best_token_peak_mc:
+                          type: number
+                          nullable: true
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: FREE
+      x-badges:
+      - name: FREE
+        position: after
+        color: '#64748b'
+      operationId: getDeployerHunterByWalletTrajectory
+      x-operation-id-source: derived
+  /deployer-hunter/{wallet}/as-of:
+    get:
+      tags:
+      - Deployer Hunter
+      summary: Deployer reputation as it stood on a date (point-in-time)
+      description: 'The deployer''s reputation **exactly as it stood on `date`** (default today, UTC) — the latest write-on-change snapshot at or before that date, so a backtest sees only what was knowable then. Because snapshots are only written when state changes, `snapshot.snapshot_date` can be earlier than `requested_date`; both are returned and `carried: true` marks that case. If no snapshot exists at or before `date` the response is `as_of: false, snapshot: null` — nothing is synthesized. `first_snapshot_date` says when tracking began. Snapshots exist from 2026-04-07. Untracked wallets return `is_deployer: false`. PRO+.'
+      parameters:
+      - name: wallet
+        in: path
+        required: true
+        schema:
+          type: string
+          example: UVXV1BHPQFBfDS1tSVb48kXFMkeZ7ojfFkfsVFEAgyE
+      - name: date
+        in: query
+        schema:
+          type: string
+          format: date
+          example: '2026-08-15'
+        description: 'YYYY-MM-DD (UTC). Default: today. Must be ≥ 2026-04-07 and not in the future.'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  coverage:
+                    $ref: '#/components/schemas/LaunchCoverage'
+                  is_deployer:
+                    type: boolean
+                  wallet:
+                    type: string
+                  requested_date:
+                    type: string
+                    format: date
+                  as_of:
+                    type: boolean
+                    description: true when a snapshot at or before requested_date exists
+                  first_snapshot_date:
+                    type: string
+                    format: date
+                    nullable: true
+                  snapshot:
+                    type: object
+                    nullable: true
+                    properties:
+                      snapshot_date:
+                        type: string
+                        format: date
+                      carried:
+                        type: boolean
+                        description: state recorded before requested_date and unchanged by then
+                      tier:
+                        type: string
+                        nullable: true
+                      is_tracked:
+                        type: boolean
+                        nullable: true
+                      total_deployed:
+                        type: integer
+                        nullable: true
+                      total_bonded:
+                        type: integer
+                        nullable: true
+                      bonding_rate:
+                        type: number
+                        nullable: true
+                      recent_bond_rate:
+                        type: number
+                        nullable: true
+                      avg_peak_mc:
+                        type: number
+                        nullable: true
+                      best_token_peak_mc:
+                        type: number
+                        nullable: true
+                      captured_at:
+                        type: string
+                        format: date-time
+                        nullable: true
+                  note:
+                    type: string
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '400':
+          description: Invalid wallet or date (`min_date` echoed)
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+      x-madeonsol-tier: PRO
+      x-badges:
+      - name: PRO
+        position: after
+        color: '#1d4ed8'
+      operationId: getDeployerHunterByWalletAsOf
+      x-operation-id-source: derived
+  /deployer-hunter/{wallet}/rewards:
+    get:
+      tags:
+      - Deployer Hunter
+      summary: Deployer creator-fee rewards — collected vs attributed
+      description: 'pump.fun **creator-fee rewards** for a wallet, answered two ways that are never merged. **`collected`** = what actually reached the wallet: `direct_claims` (collect_creator_fee — these rows carry no mint; history since 2026-08-17 is retained, archive policy pending), `social_claims` (social-handle PDA claims paid to the wallet) and `share_payouts` (distribute_creator_fees payouts naming the wallet as a shareholder, on any token — `on_own_tokens` isolates the ones it deployed). **`attributed`** = every distribute_creator_fees payout on the tokens the wallet **deployed**, whoever received it, split `to_self` / `to_others` with `redirected_pct`. A deployer whose attributed total dwarfs its collected total is redirecting fees (launch tool, KOL, social handle) — that gap is the signal. Each money block carries `sol`, `usdc` and `usd` (quotes are summed separately; `usd` is null when a SOL amount exists and no SOL price is available, never a silent zero). `top_tokens` / `top_recipients` (≤10 each) show where the attributed fees went, with social PDAs labelled. Works for non-deployers too (`is_deployer: false`, attributed empty). Shareholder payouts and social claims since 2026-08-17. Tokens on the default config (100% to the creator) pay via direct claims, so `attributed` only covers tokens whose fees were ever split. PRO+.'
+      parameters:
+      - name: wallet
+        in: path
+        required: true
+        schema:
+          type: string
+          example: gVDXhoGbePACvSqN7CZBtQXFW9eyJwsgudPEwSydAkx
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  wallet:
+                    type: string
+                  is_deployer:
+                    type: boolean
+                  tokens_in_scope:
+                    type: integer
+                    description: tokens attributed to the wallet in our token table — the universe `attributed` is computed over; not the profile's total_tokens_deployed
+                  collected:
+                    type: object
+                    properties:
+                      sol:
+                        type: number
+                      usdc:
+                        type: number
+                      usd:
+                        type: number
+                        nullable: true
+                      direct_claims:
+                        type: object
+                        properties:
+                          count:
+                            type: integer
+                          sol:
+                            type: number
+                          usdc:
+                            type: number
+                          usd:
+                            type: number
+                            nullable: true
+                          first_at:
+                            type: string
+                            nullable: true
+                          last_at:
+                            type: string
+                            nullable: true
+                          window_days:
+                            type: integer
+                      social_claims:
+                        type: object
+                        properties:
+                          count:
+                            type: integer
+                          sol:
+                            type: number
+                          usdc:
+                            type: number
+                          usd:
+                            type: number
+                            nullable: true
+                          first_at:
+                            type: string
+                            nullable: true
+                          last_at:
+                            type: string
+                            nullable: true
+                      share_payouts:
+                        type: object
+                        properties:
+                          count:
+                            type: integer
+                          tokens:
+                            type: integer
+                          sol:
+                            type: number
+                          usdc:
+                            type: number
+                          usd:
+                            type: number
+                            nullable: true
+                          on_own_tokens:
+                            type: object
+                            properties:
+                              sol:
+                                type: number
+                              usdc:
+                                type: number
+                              usd:
+                                type: number
+                                nullable: true
+                          first_at:
+                            type: string
+                            nullable: true
+                          last_at:
+                            type: string
+                            nullable: true
+                  attributed:
+                    type: object
+                    properties:
+                      count:
+                        type: integer
+                      sol:
+                        type: number
+                      usdc:
+                        type: number
+                      usd:
+                        type: number
+                        nullable: true
+                      to_self:
+                        type: object
+                        properties:
+                          sol:
+                            type: number
+                          usdc:
+                            type: number
+                          usd:
+                            type: number
+                            nullable: true
+                      to_others:
+                        type: object
+                        properties:
+                          sol:
+                            type: number
+                          usdc:
+                            type: number
+                          usd:
+                            type: number
+                            nullable: true
+                      redirected_pct:
+                        type: number
+                        nullable: true
+                        description: share of attributed fees that went to wallets other than the deployer (0–100)
+                      tokens_with_payouts:
+                        type: integer
+                      distributions:
+                        type: integer
+                      recipients:
+                        type: integer
+                      first_at:
+                        type: string
+                        nullable: true
+                      last_at:
+                        type: string
+                        nullable: true
+                  top_tokens:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        mint:
+                          type: string
+                        quote:
+                          type: string
+                          enum:
+                          - SOL
+                          - USDC
+                        total:
+                          type: number
+                        total_usd:
+                          type: number
+                          nullable: true
+                        to_self:
+                          type: number
+                        to_self_usd:
+                          type: number
+                          nullable: true
+                        payouts:
+                          type: integer
+                        recipients:
+                          type: integer
+                        last_at:
+                          type: string
+                  top_recipients:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        address:
+                          type: string
+                        quote:
+                          type: string
+                          enum:
+                          - SOL
+                          - USDC
+                        total:
+                          type: number
+                        total_usd:
+                          type: number
+                          nullable: true
+                        tokens:
+                          type: integer
+                        payouts:
+                          type: integer
+                        last_at:
+                          type: string
+                        is_self:
+                          type: boolean
+                        is_social_pda:
+                          type: boolean
+                        social:
+                          type: object
+                          nullable: true
+                          properties:
+                            platform:
+                              type: integer
+                            user_id:
+                              type: string
+                  quote:
+                    type: object
+                    properties:
+                      sol_usd:
+                        type: number
+                        nullable: true
+                  coverage:
+                    type: object
+                    properties:
+                      payouts_since:
+                        type: string
+                        format: date
+                      direct_claims_window_days:
+                        type: integer
+                      note:
+                        type: string
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+      x-madeonsol-tier: PRO
+      x-badges:
+      - name: PRO
+        position: after
+        color: '#1d4ed8'
+      operationId: getDeployerHunterByWalletRewards
+      x-operation-id-source: derived
+  /deployer-hunter/{wallet}/activity:
+    get:
+      tags:
+      - Deployer Hunter
+      summary: Deployer activity timeline (launches, dev trades, creator transfers, fee…
+      description: One newest-first timeline of what a deployer wallet did, from data MadeOnSol already holds.
+      parameters:
+      - name: wallet
+        in: path
+        required: true
+        schema:
+          type: string
+          example: gVDXhoGbePACvSqN7CZBtQXFW9eyJwsgudPEwSydAkx
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          default: 50
+        description: 'Events per page. Clamped to the plan''s hard cap: 100 (PRO, ULTRA) or 500 (BUSINESS).'
+      - name: cursor
+        in: query
+        schema:
+          type: string
+        description: '`pagination.next_cursor` from the previous page. A cursor older than the effective window returns 400.'
+      - name: since
+        in: query
+        schema:
+          type: string
+          format: date-time
+        description: 'Requested window start (ISO 8601). Clamped to the plan window, never widened; in the future → 400. Default: the plan window.'
+      - name: types
+        in: query
+        schema:
+          type: string
+          example: launch,dev_sell
+        description: 'Comma list of event types: launch, dev_buy, dev_sell, creator_transferred, fee_claim, funding_in, capital_out.'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  wallet:
+                    type: string
+                  is_deployer:
+                    type: boolean
+                  deployer:
+                    type: object
+                    nullable: true
+                    properties:
+                      tier:
+                        type: string
+                        nullable: true
+                      first_deploy_at:
+                        type: string
+                        nullable: true
+                      last_deploy_at:
+                        type: string
+                        nullable: true
+                  plan:
+                    type: object
+                    properties:
+                      entitlement:
+                        type: string
+                        enum:
+                        - pro
+                        - ultra
+                        - business
+                      window_days:
+                        type: integer
+                        nullable: true
+                      max_limit:
+                        type: integer
+                      history:
+                        type: object
+                        properties:
+                          requested:
+                            type: object
+                            properties:
+                              from:
+                                type: string
+                                nullable: true
+                              to:
+                                type: string
+                                nullable: true
+                              source:
+                                type: string
+                                enum:
+                                - since_param
+                                - plan_default
+                          effective:
+                            type: object
+                            properties:
+                              from:
+                                type: string
+                                nullable: true
+                              to:
+                                type: string
+                                nullable: true
+                              clamped:
+                                type: boolean
+                              max_days:
+                                type: integer
+                                nullable: true
+                          online:
+                            type: object
+                            properties:
+                              from:
+                                type: string
+                                nullable: true
+                              to:
+                                type: string
+                                nullable: true
+                              served:
+                                type: boolean
+                          archive_only:
+                            type: object
+                            nullable: true
+                            description: Range held only in the Parquet archive. null when the window does not reach it. served:true only when the archive answered for the whole range (reason null); otherwise served:false with the reason (missing_months when month-shaped).
+                            properties:
+                              from:
+                                type: string
+                                nullable: true
+                              to:
+                                type: string
+                                nullable: true
+                              served:
+                                type: boolean
+                              reason:
+                                type: string
+                                nullable: true
+                                enum:
+                                - archive_reads_not_enabled
+                                - archive_unavailable
+                                - archive_timeout
+                                - archive_contract_mismatch
+                                - archive_ledger_unavailable
+                                - archive_months_missing
+                                - null
+                              missing_months:
+                                type: array
+                                items:
+                                  type: string
+                                description: YYYY-MM months of the range that are not served.
+                  window:
+                    type: object
+                    properties:
+                      since:
+                        type: string
+                        nullable: true
+                      until:
+                        type: string
+                      max_days:
+                        type: integer
+                        nullable: true
+                      applies_to:
+                        type: string
+                        enum:
+                        - event_time
+                  events:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                      - id
+                      - type
+                      - at
+                      - time_basis
+                      properties:
+                        id:
+                          type: string
+                        type:
+                          type: string
+                          enum:
+                          - launch
+                          - dev_buy
+                          - dev_sell
+                          - creator_transferred
+                          - fee_claim
+                          - funding_in
+                          - capital_out
+                        at:
+                          type: string
+                        time_basis:
+                          type: string
+                          enum:
+                          - chain
+                          - ingest
+                          - chain_or_ingest
+                        mint:
+                          type: string
+                          nullable: true
+                        name:
+                          type: string
+                          nullable: true
+                        symbol:
+                          type: string
+                          nullable: true
+                        launchpad:
+                          type: string
+                          nullable: true
+                        bonded_at:
+                          type: string
+                          nullable: true
+                        fee_payer_is_creator:
+                          type: boolean
+                          nullable: true
+                        external_fee_payer:
+                          type: boolean
+                          nullable: true
+                        dev_buy_sol:
+                          type: number
+                          nullable: true
+                        dev_buy_tokens:
+                          type: number
+                          nullable: true
+                        dev_buy_supply_pct:
+                          type: number
+                          nullable: true
+                        own_token:
+                          type: boolean
+                        sol:
+                          type: number
+                          nullable: true
+                        tokens:
+                          type: number
+                          nullable: true
+                        price_usd:
+                          type: number
+                          nullable: true
+                        first_at:
+                          type: string
+                          nullable: true
+                        last_at:
+                          type: string
+                          nullable: true
+                        aggregate:
+                          type: boolean
+                        from:
+                          type: string
+                          nullable: true
+                        to:
+                          type: string
+                          nullable: true
+                        direction:
+                          type: string
+                          enum:
+                          - in
+                          - out
+                        initiated_by:
+                          type: string
+                          enum:
+                          - creator
+                          - platform_admin
+                          - other_signer
+                          - unknown
+                        tx:
+                          type: string
+                        kind:
+                          type: string
+                          enum:
+                          - direct
+                          - social
+                        amount_raw:
+                          type: string
+                          nullable: true
+                        quote_mint:
+                          type: string
+                          nullable: true
+                        source:
+                          type: string
+                        recipient:
+                          type: string
+                        asset:
+                          type: string
+                        decimals:
+                          type: integer
+                          nullable: true
+                        transfer_count:
+                          type: integer
+                        sample_tx_ids:
+                          type: array
+                          items:
+                            type: string
+                        first_tx:
+                          type: string
+                          nullable: true
+                  pagination:
+                    type: object
+                    properties:
+                      limit:
+                        type: integer
+                      requested_limit:
+                        type: integer
+                      limit_capped:
+                        type: boolean
+                      next_cursor:
+                        type: string
+                        nullable: true
+                      has_more:
+                        type: boolean
+                  coverage:
+                    type: object
+                    properties:
+                      status:
+                        type: string
+                        enum:
+                        - observed
+                        - partial
+                      families:
+                        type: object
+                        additionalProperties:
+                          type: object
+                          properties:
+                            source:
+                              type: string
+                            retention:
+                              type: string
+                            scope:
+                              type: string
+                            truncated:
+                              type: boolean
+                            loaded:
+                              type: boolean
+                            complete:
+                              type: boolean
+                            complete_from:
+                              type: string
+                              nullable: true
+                            archive_required_before:
+                              type: string
+                              nullable: true
+                            boundary_known:
+                              type: boolean
+                            retention_boundary:
+                              type: string
+                              description: 'Fixed-retention families only (dev_transfers: 30 days online). Before this instant the rows were pruned; a window starting earlier is complete: false.'
+                            archive:
+                              type: object
+                              description: dev_trades only, only while archive reads are enabled and the window reaches below the online boundary.
+                              properties:
+                                read:
+                                  type: string
+                                  enum:
+                                  - ok
+                                  - not_needed
+                                  - failed
+                                served:
+                                  type: boolean
+                                reason:
+                                  type: string
+                                  nullable: true
+                                  enum:
+                                  - archive_unavailable
+                                  - archive_timeout
+                                  - archive_contract_mismatch
+                                  - archive_ledger_unavailable
+                                  - archive_months_missing
+                                  - null
+                                missing_months:
+                                  type: array
+                                  items:
+                                    type: string
+                                months_read:
+                                  type: array
+                                  items:
+                                    type: string
+                      future_events_dropped:
+                        type: integer
+                      note:
+                        type: string
+                  identity:
+                    type: object
+                    description: 'ULTRA and BUSINESS only; absent on PRO. Currently always `status: not_available` with `reason: identity_stitching_not_released` (identity stitching is not released). When released, the block is read from MadeOnSol''s offline identity graph (one hop: the wallet''s identity, with evidence and confidence) and answers `not_available` with another `reason` whenever that graph is not current or fails a consistency check (`builder_stale`: the graph is older than `builder.stale_after_seconds`; old links are never served as current). `not_available` never means the wallet operates alone.'
+                    properties:
+                      status:
+                        type: string
+                        enum:
+                        - not_available
+                        - linked
+                        - no_strong_evidence
+                      reason:
+                        type: string
+                        enum:
+                        - identity_stitching_not_released
+                        - builder_never_ran
+                        - builder_stale
+                        - builder_rule_mismatch
+                        - builder_gate_failed
+                        - identity_not_active
+                        - identity_inconsistent
+                        - evidence_missing
+                        - member_excluded
+                        - identity_lookup_failed
+                        description: Only with status not_available.
+                      note:
+                        type: string
+                        description: Only with status not_available.
+                      scope:
+                        type: string
+                        enum:
+                        - builder_one_hop
+                      rule_version:
+                        type: string
+                      identity_id:
+                        type: string
+                        nullable: true
+                      wallet_count:
+                        type: integer
+                        description: members + 1 (the asked wallet).
+                      anchor:
+                        type: string
+                        nullable: true
+                      self:
+                        type: object
+                        nullable: true
+                        properties:
+                          role:
+                            type: string
+                          confidence:
+                            type: string
+                            enum:
+                            - confirmed
+                            - strong
+                            - probable
+                          path_len:
+                            type: integer
+                          best_evidence_class:
+                            type: string
+                            nullable: true
+                          evidence_count:
+                            type: integer
+                          is_anchor:
+                            type: boolean
+                      members:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            wallet:
+                              type: string
+                            role:
+                              type: string
+                            confidence:
+                              type: string
+                              enum:
+                              - confirmed
+                              - strong
+                              - probable
+                            path_len:
+                              type: integer
+                            best_evidence_class:
+                              type: string
+                              nullable: true
+                            evidence_count:
+                              type: integer
+                            is_anchor:
+                              type: boolean
+                      related:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            wallet:
+                              type: string
+                            evidence_class:
+                              type: string
+                            strength:
+                              type: string
+                              enum:
+                              - context
+                            basis:
+                              type: string
+                      evidence:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            wallet_a:
+                              type: string
+                            wallet_b:
+                              type: string
+                            evidence_class:
+                              type: string
+                            direction:
+                              type: string
+                              enum:
+                              - a_to_b
+                              - symmetric
+                            observed_at:
+                              type: string
+                              format: date-time
+                            time_basis:
+                              type: string
+                              enum:
+                              - chain
+                              - ingest
+                              - chain_or_ingest
+                            tx_ids:
+                              type: array
+                              items:
+                                type: string
+                            token_mint:
+                              type: string
+                              nullable: true
+                            strength:
+                              type: string
+                              enum:
+                              - confirmed
+                              - strong
+                              - probable
+                              - context
+                            basis:
+                              type: string
+                            rule_version:
+                              type: string
+                      builder:
+                        type: object
+                        properties:
+                          run_id:
+                            type: integer
+                          built_at:
+                            type: string
+                            format: date-time
+                          age_seconds:
+                            type: integer
+                          stale_after_seconds:
+                            type: integer
+                          hub_floor:
+                            type: integer
+                            nullable: true
+                      disclaimer:
+                        type: string
+                      coverage_note:
+                        type: string
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '400':
+          description: Invalid wallet, limit below 1, unknown event type, malformed cursor, a cursor outside the effective window, or a malformed / future `since`
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          description: '`code: feature_disabled` (not enabled yet; no data keys). Never an empty result.'
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      x-madeonsol-tier: PRO
+      x-badges:
+      - name: PRO
+        position: after
+        color: '#1d4ed8'
+      operationId: getDeployerHunterByWalletActivity
+      x-operation-id-source: derived
+  /deployer-hunter/{wallet}/history:
+    get:
+      tags:
+      - Deployer Hunter
+      summary: Deployer daily reputation time-series
+      description: 'A deployer''s **daily reputation snapshots** — tier, tracked flag, cumulative deploy/bond counts, bonding & recent-bond rates, and peak-MC stats as they stood on each `date`. Lets you backtest "was this deployer elite AT THE TIME it launched token X?" without look-ahead bias, since every snapshot reflects only what was known that day. Returns `is_deployer: false` with an empty `snapshots` array for untracked wallets. PRO+.'
+      parameters:
+      - name: wallet
+        in: path
+        required: true
+        schema:
+          type: string
+          example: 2FxiPRPLYX3H84FZkdRiUHDgDm4U5u98etbL4yvZ3qRq
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 365
+          default: 90
+        description: Number of most-recent daily snapshots to return
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  coverage:
+                    $ref: '#/components/schemas/LaunchCoverage'
+                  is_deployer:
+                    type: boolean
+                  wallet:
+                    type: string
+                  snapshots:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        date:
+                          type: string
+                          format: date
+                        tier:
+                          type: string
+                        is_tracked:
+                          type: boolean
+                        total_deployed:
+                          type: integer
+                        total_bonded:
+                          type: integer
+                        bonding_rate:
+                          type: number
+                          nullable: true
+                        recent_bond_rate:
+                          type: number
+                          nullable: true
+                        avg_peak_mc:
+                          type: number
+                          nullable: true
+                        best_token_peak_mc:
+                          type: number
+                          nullable: true
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: PRO
+      x-badges:
+      - name: PRO
+        position: after
+        color: '#1d4ed8'
+      operationId: getDeployerHunterByWalletHistory
+      x-operation-id-source: derived
+  /deployer-hunter/recent-bonds:
+    get:
+      tags:
+      - Deployer Hunter
+      summary: Recently bonded pump.fun tokens
+      description: Tokens from tracked deployers that completed the pump.fun bonding curve (≈85 SOL raised) and graduated to PumpSwap. Use `since` for incremental polling; returns `next_since` cursor.
+      parameters:
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 20
+      - name: since
+        in: query
+        schema:
+          type: string
+          format: date-time
+        description: Only bonds after this ISO timestamp (pass `next_since` from previous response for incremental polling)
+      - name: tier
+        in: query
+        schema:
+          type: string
+          enum:
+          - elite
+          - good
+          - moderate
+          - rising
+          - cold
+        description: Filter by deployer reputation tier
+      - name: peak_mc_min
+        in: query
+        schema:
+          type: integer
+          minimum: 0
+        description: Only bonds that reached at least this peak market cap (USD)
+      responses:
+        '200':
+          description: OK. Includes `next_since` cursor and `token_image_url` per row.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  coverage:
+                    $ref: '#/components/schemas/LaunchCoverage'
+                  tokens:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        token_mint:
+                          type: string
+                        token_name:
+                          type: string
+                          nullable: true
+                        token_symbol:
+                          type: string
+                          nullable: true
+                        token_image_url:
+                          type: string
+                          nullable: true
+                        deployed_at:
+                          type: string
+                          format: date-time
+                        bonded_at:
+                          type: string
+                          format: date-time
+                        time_to_bond_minutes:
+                          type: number
+                          nullable: true
+                        peak_market_cap:
+                          type: number
+                          nullable: true
+                        mc_at_bond:
+                          type: number
+                          nullable: true
+                        instant_bond:
+                          type: boolean
+                          description: create → migrate within ~90s (curve filled by a bundle)
+                        deployers:
+                          type: object
+                          description: The deployer that launched this token
+                          properties:
+                            wallet_address:
+                              type: string
+                            tier:
+                              type: string
+                              enum:
+                              - elite
+                              - good
+                              - moderate
+                              - rising
+                              - cold
+                              - unranked
+                              nullable: true
+                            total_tokens_deployed:
+                              type: integer
+                            total_bonded:
+                              type: integer
+                            instant_bonds:
+                              type: integer
+                              nullable: true
+                            bonding_rate:
+                              type: number
+                              nullable: true
+                            recent_outcomes:
+                              type: string
+                              nullable: true
+                            recent_bond_rate:
+                              type: number
+                              nullable: true
+                  limit:
+                    type: integer
+                  next_since:
+                    type: string
+                    format: date-time
+                    nullable: true
+                    description: Cursor — pass as ?since= to fetch only newer bonds
+                  delay:
+                    type: string
+                    nullable: true
+                    description: BASIC tier only — present when the feed is free-tier delayed, e.g. "5m"
+                  delay_seconds:
+                    type: integer
+                    nullable: true
+                  as_of:
+                    type: string
+                    format: date-time
+                    nullable: true
+                  delay_note:
+                    type: string
+                    nullable: true
+                  upgrade:
+                    type: string
+                    nullable: true
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: FREE
+      x-badges:
+      - name: FREE
+        position: after
+        color: '#64748b'
+      operationId: getDeployerHunterRecentBonds
+      x-operation-id-source: derived
+  /deployer-hunter/leaderboard:
+    get:
+      tags:
+      - Deployer Hunter
+      summary: Deployer reputation leaderboard
+      description: Top Pump.fun deployers by bonding rate, recent performance, total bonded count, or last deploy time. Excludes unranked deployers.
+      parameters:
+      - name: tier
+        in: query
+        schema:
+          type: string
+          enum:
+          - elite
+          - good
+          - moderate
+          - rising
+          - cold
+      - name: sort
+        in: query
+        schema:
+          type: string
+          enum:
+          - bonding_rate
+          - recent_bond_rate
+          - total_bonded
+          - last_deploy_at
+          - post_bond_survival_rate
+          default: bonding_rate
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 20
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  coverage:
+                    $ref: '#/components/schemas/LaunchCoverage'
+                  deployers:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        wallet_address:
+                          type: string
+                        total_tokens_deployed:
+                          type: integer
+                        total_bonded:
+                          type: integer
+                        instant_bonds:
+                          type: integer
+                          nullable: true
+                        bonding_rate:
+                          type: number
+                          nullable: true
+                        recent_outcomes:
+                          type: string
+                          nullable: true
+                        recent_bond_rate:
+                          type: number
+                          nullable: true
+                        avg_time_to_bond_minutes:
+                          type: number
+                          nullable: true
+                        best_token_peak_mc:
+                          type: number
+                          nullable: true
+                        avg_peak_mc:
+                          type: number
+                          nullable: true
+                        runner_rate:
+                          type: number
+                          nullable: true
+                        post_bond_survival_rate:
+                          type: number
+                          nullable: true
+                        post_bond_2x_rate:
+                          type: number
+                          nullable: true
+                        post_bond_labeled_count:
+                          type: integer
+                          nullable: true
+                        last_deploy_at:
+                          type: string
+                          format: date-time
+                          nullable: true
+                        last_bond_at:
+                          type: string
+                          format: date-time
+                          nullable: true
+                        tier:
+                          type: string
+                          enum:
+                          - elite
+                          - good
+                          - moderate
+                          - rising
+                          - cold
+                          nullable: true
+                        is_tracked:
+                          type: boolean
+                        label:
+                          type: string
+                          nullable: true
+                        first_seen_at:
+                          type: string
+                          format: date-time
+                          nullable: true
+                  total:
+                    type: integer
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+                  has_more:
+                    type: boolean
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: FREE
+      x-badges:
+      - name: FREE
+        position: after
+        color: '#64748b'
+      operationId: getDeployerHunterLeaderboard
+      x-operation-id-source: derived
+  /deployer-hunter/stats:
+    get:
+      tags:
+      - Deployer Hunter
+      summary: Deployer ecosystem stats
+      description: Aggregate deployer-hunter stats, including average market cap at alert time per deployer tier (last 30d).
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  coverage:
+                    $ref: '#/components/schemas/LaunchCoverage'
+                  tracked_count:
+                    type: integer
+                  signals_today:
+                    type: integer
+                  bonds_detected:
+                    type: integer
+                  bond_rate:
+                    type: number
+                    description: bonds_detected ÷ total deploys, percent
+                  tiers:
+                    type: object
+                    properties:
+                      elite:
+                        type: integer
+                      good:
+                        type: integer
+                      rising:
+                        type: integer
+                  avg_mc_at_alert_usd_30d:
+                    type: object
+                    properties:
+                      elite:
+                        type: number
+                        nullable: true
+                      good:
+                        type: number
+                        nullable: true
+                      rising:
+                        type: number
+                        nullable: true
+                    description: Average market cap (USD) at alert time per tier, last 30d
+                  mc_at_alert_samples_30d:
+                    type: object
+                    properties:
+                      elite:
+                        type: integer
+                        nullable: true
+                      good:
+                        type: integer
+                        nullable: true
+                      rising:
+                        type: integer
+                        nullable: true
+                    description: Alerts with an MC behind each avg — every alert in the 30 d window (SQL aggregate, not a row sample). null only when that aggregate failed (mc_at_alert_complete=false)
+                  mc_at_alert_window_start:
+                    type: string
+                    format: date-time
+                  mc_at_alert_complete:
+                    type: boolean
+                    description: false = the per-tier MC aggregate failed; the two maps above are null (unknown), never 0
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: FREE
+      x-badges:
+      - name: FREE
+        position: after
+        color: '#64748b'
+      operationId: getDeployerHunterStats
+      x-operation-id-source: derived
+  /deployer-hunter/alert-stats:
+    get:
+      tags:
+      - Deployer Hunter
+      summary: Deployer alert volume stats
+      description: Deployer alert volume over a lookback window (`7d`, `30d` or `all`, default `all`). Returns alert counts for sizing and monitoring your deployer-hunter usage. Any tier.
+      parameters:
+      - name: period
+        in: query
+        schema:
+          type: string
+          enum:
+          - 7d
+          - 30d
+          - all
+          default: all
+        description: Lookback window
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  bond_rate:
+                    type: object
+                    properties:
+                      total_deploys:
+                        type: integer
+                      total_bonded:
+                        type: integer
+                      rate:
+                        type: number
+                        description: Percent
+                  multiplier:
+                    type: object
+                    description: Peak-MC-at-bond ÷ MC-at-alert multiplier distribution, over alerted tokens with a resolved MC
+                    properties:
+                      total_with_mc:
+                        type: integer
+                      pct_2x:
+                        type: number
+                      pct_5x:
+                        type: number
+                      pct_10x:
+                        type: number
+                      pct_50x:
+                        type: number
+                      avg_multiplier:
+                        type: number
+                      best_multiplier:
+                        type: number
+                  tiers:
+                    type: object
+                    description: Keyed by deployer tier (elite/good/rising)
+                    additionalProperties:
+                      type: object
+                      properties:
+                        deploys:
+                          type: integer
+                        bonded:
+                          type: integer
+                        bond_rate:
+                          type: number
+                        avg_multiplier:
+                          type: number
+                          nullable: true
+                        total_with_mc:
+                          type: integer
+                  period:
+                    type: string
+                    enum:
+                    - 7d
+                    - 30d
+                    - all
+                  sampled_rows:
+                    type: integer
+                    description: Rows the multiplier/tier aggregates were computed over
+                  truncated:
+                    type: boolean
+                    description: true if the population exceeded the internal row cap and the aggregates are a sample, not the full population
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: FREE
+      x-badges:
+      - name: FREE
+        position: after
+        color: '#64748b'
+      operationId: getDeployerHunterAlertStats
+      x-operation-id-source: derived
+  /deployer-hunter/best-tokens:
+    get:
+      tags:
+      - Deployer Hunter
+      summary: Top tokens from graded deployers
+      description: Best-performing recent tokens launched by ranked (non-unranked) deployers.
+      parameters:
+      - name: period
+        in: query
+        schema:
+          type: string
+          enum:
+          - 7d
+          - 30d
+          - all
+          default: 7d
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 20
+          default: 5
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  coverage:
+                    $ref: '#/components/schemas/LaunchCoverage'
+                  tokens:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: integer
+                        token_mint:
+                          type: string
+                        token_name:
+                          type: string
+                          nullable: true
+                        token_symbol:
+                          type: string
+                          nullable: true
+                        token_image_url:
+                          type: string
+                          nullable: true
+                        bonded_at:
+                          type: string
+                          format: date-time
+                          nullable: true
+                        peak_market_cap:
+                          type: number
+                          nullable: true
+                        mc_at_bond:
+                          type: number
+                          nullable: true
+                        market_cap_at_alert:
+                          type: number
+                          nullable: true
+                        mc_multiplier:
+                          type: number
+                          nullable: true
+                          description: peak_market_cap ÷ market_cap_at_alert
+                        deployer_wallet:
+                          type: string
+                        deployer_tier:
+                          type: string
+                          enum:
+                          - elite
+                          - good
+                          - moderate
+                          - rising
+                          - cold
+                          - unranked
+                        launchpad:
+                          type: string
+                        alerted_at:
+                          type: string
+                          format: date-time
+                  period:
+                    type: string
+                    enum:
+                    - 7d
+                    - 30d
+                    - all
+                  limit:
+                    type: integer
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: FREE
+      x-badges:
+      - name: FREE
+        position: after
+        color: '#64748b'
+      operationId: getDeployerHunterBestTokens
+      x-operation-id-source: derived
+components:
+  headers:
+    XRateLimitReset:
+      description: When the window resets, as a Unix epoch in SECONDS (next 00:00 UTC for the daily quota; about 60 s ahead for a per-minute bucket).
+      schema:
+        type: integer
+      example: 1791158400
+    XRateLimitRemaining:
+      description: Calls left in that window. `0` on a quota 429.
+      schema:
+        type: integer
+        minimum: 0
+      example: 9412
+    XDataDelay:
+      description: 'Free-tier only: the feed in this body is delayed by this many seconds (same value as the body''s `delay_seconds`). Absent on real-time responses.'
+      schema:
+        type: integer
+        minimum: 1
+      example: 300
+    XRateLimitLimit:
+      description: 'Size of the rate-limit window this call was counted against: the daily quota for your tier on data endpoints, the per-minute bucket on `/stream/token` (10) and `/stream/sessions` (30), the hourly allowance for the public demo key. Sent once the key has been authenticated and rate-limited, so it is absent on authentication-stage errors.'
+      schema:
+        type: integer
+        minimum: 0
+      example: 10000
+    XMadeOnSolQuotaWarning:
+      description: 'Free-tier only, past about 70 % of the daily quota: a human-readable usage line with an upgrade link.'
+      schema:
+        type: string
+      example: '150/200 used - upgrade for 50x higher limits: https://madeonsol.com/checkout?tier=PRO'
+    XRequestId:
+      description: Unique id of this response. On responses built after authentication it is also the `request_id` of the audit-log row for the call, so quote it in a support request. Present on every response of the keyed API.
+      required: true
+      schema:
+        type: string
+        format: uuid
+      example: 3f6c1d2e-8a4b-4f7e-9c21-5b0d7e6a9f13
+    XRateLimitUsed:
+      description: Calls used in that window (`limit − remaining`).
+      schema:
+        type: integer
+        minimum: 0
+      example: 588
+    RetryAfter:
+      description: Seconds to wait before retrying (RFC 9110 delay-seconds, at least 1). Sent on every 429 (quota, concurrency, authentication-failure) and every 503; when the body carries `retry_after_seconds` it is the same value.
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+      example: 10
+  responses:
+    ServiceUnavailable:
+      description: 'Temporarily unavailable — a Postgres statement timeout while the dataset is under load or maintenance (`statement_timeout`, with `X-RateLimit-*` and `_rid`), or the API-key lookup itself unavailable (`auth_backend_unavailable`, authentication stage: no `X-RateLimit-*`, no `_rid`, not counted as a failed authentication). Always carries `Retry-After`; honour it.'
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        X-RateLimit-Limit:
+          $ref: '#/components/headers/XRateLimitLimit'
+        X-RateLimit-Remaining:
+          $ref: '#/components/headers/XRateLimitRemaining'
+        X-RateLimit-Used:
+          $ref: '#/components/headers/XRateLimitUsed'
+        X-RateLimit-Reset:
+          $ref: '#/components/headers/XRateLimitReset'
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ServiceUnavailableError'
+          examples:
+            statement_timeout:
+              summary: Statement timeout
+              value:
+                error: Query timed out — this dataset is under load or being maintained. Retry shortly.
+                error_kind: statement_timeout
+                retry_after_seconds: 10
+                _rid: eyJ1IjoiZXhhbXBsZSIsInQiOjE3OTEwMDAwMDAwMDAsImgiOiIwMDAwMDAwMCJ9
+            auth_backend:
+              summary: API-key lookup unavailable
+              value:
+                error: Authentication temporarily unavailable — please retry.
+                code: auth_backend_unavailable
+                error_kind: auth_backend
+                retryable: true
+                retry_after_seconds: 5
+    TierForbidden:
+      description: 'Forbidden. One of: the key''s tier is below this endpoint''s or parameter''s gate (`tier_required` with an `upgrade` block); the public demo key used outside its allow-list (`demo_key_endpoint_not_allowed`); an invalid or revoked key; an origin-restricted key called from a disallowed origin (`code` `origin_not_allowed` / `origin_required`). `X-RateLimit-*` headers are present only on `tier_required`.'
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        X-RateLimit-Limit:
+          $ref: '#/components/headers/XRateLimitLimit'
+        X-RateLimit-Remaining:
+          $ref: '#/components/headers/XRateLimitRemaining'
+        X-RateLimit-Used:
+          $ref: '#/components/headers/XRateLimitUsed'
+        X-RateLimit-Reset:
+          $ref: '#/components/headers/XRateLimitReset'
+      content:
+        application/json:
+          schema:
+            anyOf:
+            - $ref: '#/components/schemas/TierRequiredError'
+            - $ref: '#/components/schemas/DemoKeyNotAllowedError'
+            - $ref: '#/components/schemas/Error'
+          examples:
+            tier_required:
+              summary: Tier below the gate
+              value:
+                error: tier_required
+                message: This endpoint requires ULTRA tier — you're on PRO.
+                feature: This endpoint
+                your_tier: PRO
+                required_tier: ULTRA
+                upgrade:
+                  tier: ULTRA
+                  price_eur_per_month: 131
+                  price_usdc_per_month: 149
+                  daily_limit: 100000
+                  burst_limit: 600
+                  pitch: …
+                  url: https://madeonsol.com/pricing
+                  upgrade_url: https://madeonsol.com/checkout?tier=ULTRA
+                support: 'Priority support: info@madeonsol.com'
+                _rid: eyJ1IjoiZXhhbXBsZSIsInQiOjE3OTEwMDAwMDAwMDAsImgiOiIwMDAwMDAwMCJ9
+            demo_key:
+              summary: Demo key outside its allow-list
+              value:
+                error: demo_key_endpoint_not_allowed
+                message: The public demo key works on /kol/feed, /deployer-hunter/alerts, and /alpha/leaderboard only. This endpoint requires the PRO plan or higher; a free API key will not unlock it. See https://madeonsol.com/pricing.
+                endpoint_tier: PRO
+                allowed_endpoints:
+                - /api/v1/kol/feed
+                - /api/v1/deployer-hunter/alerts
+                - /api/v1/alpha/leaderboard
+                signup_url: https://madeonsol.com/developer
+                upgrade_url: https://madeonsol.com/checkout?tier=PRO
+            revoked_key:
+              summary: Invalid or revoked key
+              value:
+                error: Invalid or revoked API key
+    InternalError:
+      description: Unexpected server error from the route (`Internal server error`, with `_rid`). Safe to retry with backoff. A failed API-key lookup is a 503 `auth_backend_unavailable`, never a 500.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        X-RateLimit-Limit:
+          $ref: '#/components/headers/XRateLimitLimit'
+        X-RateLimit-Remaining:
+          $ref: '#/components/headers/XRateLimitRemaining'
+        X-RateLimit-Used:
+          $ref: '#/components/headers/XRateLimitUsed'
+        X-RateLimit-Reset:
+          $ref: '#/components/headers/XRateLimitReset'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            route:
+              summary: Route error
+              value:
+                error: Internal server error
+                _rid: eyJ1IjoiZXhhbXBsZSIsInQiOjE3OTEwMDAwMDAwMDAsImgiOiIwMDAwMDAwMCJ9
+    RateLimited:
+      description: Too many requests. Every 429 carries `Retry-After`. A quota 429 (`rate_limit_exceeded`, with `X-RateLimit-*`), a heavy-query concurrency 429 (`error_kind` `concurrency`/`capacity`), or the per-IP authentication-failure block (30 failed auths/min; plain `error` + `retry_after_seconds`, no `X-RateLimit-*`).
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        X-RateLimit-Limit:
+          $ref: '#/components/headers/XRateLimitLimit'
+        X-RateLimit-Remaining:
+          $ref: '#/components/headers/XRateLimitRemaining'
+        X-RateLimit-Used:
+          $ref: '#/components/headers/XRateLimitUsed'
+        X-RateLimit-Reset:
+          $ref: '#/components/headers/XRateLimitReset'
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/json:
+          schema:
+            anyOf:
+            - $ref: '#/components/schemas/RateLimitError'
+            - $ref: '#/components/schemas/ConcurrencyLimitError'
+            - $ref: '#/components/schemas/Error'
+          examples:
+            daily:
+              summary: Daily quota exhausted
+              value:
+                error: rate_limit_exceeded
+                error_kind: daily
+                message: Daily rate limit exceeded — 200/day for BASIC tier. Resets at midnight UTC.
+                tier: BASIC
+                limit: 200
+                resets_at: '2026-10-05T00:00:00.000Z'
+                upgrade:
+                  tier: PRO
+                  price_eur_per_month: 43
+                  price_usdc_per_month: 49
+                  daily_limit: 10000
+                  burst_limit: 300
+                  pitch: …
+                  url: https://madeonsol.com/pricing
+                  upgrade_url: https://madeonsol.com/checkout?tier=PRO
+                datasets:
+                  pitch: …
+                  url: https://madeonsol.com/datasets
+            concurrency:
+              summary: Too many heavy queries in flight
+              value:
+                error: Too many concurrent heavy queries. Up to 8 of these endpoints may be in flight at once per key — retry in a moment, or lower your request concurrency.
+                error_kind: concurrency
+                retry_after_seconds: 2
+                max_concurrent: 8
+                _rid: eyJ1IjoiZXhhbXBsZSIsInQiOjE3OTEwMDAwMDAwMDAsImgiOiIwMDAwMDAwMCJ9
+            auth_failures:
+              summary: Per-IP authentication-failure block
+              value:
+                error: Too many authentication failures from this IP. Retry in 60s.
+                retry_after_seconds: 42
+    AuthBackendUnavailable:
+      description: 'The API-key or subscription lookup could not be answered (authentication stage). Retryable and not your fault: it is never counted as a failed authentication. Honour `Retry-After`; no `X-RateLimit-*`, no `_rid`.'
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ServiceUnavailableError'
+          examples:
+            auth_backend:
+              summary: API-key lookup unavailable
+              value:
+                error: Authentication temporarily unavailable — please retry.
+                code: auth_backend_unavailable
+                error_kind: auth_backend
+                retryable: true
+                retry_after_seconds: 5
+    Unauthorized:
+      description: 'Missing or invalid API key, or an expired free-tier key. Authentication-stage error: no `X-RateLimit-*` headers, no `_rid`.'
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            missing_key:
+              summary: No Bearer key
+              value:
+                error: 'Missing authentication — use API key (Authorization: Bearer msk_...)'
+                hint: Get a free API key — 200 calls/day, no payment
+                signup_url: https://madeonsol.com/developer
+                docs_url: https://madeonsol.com/api-docs
+            bad_format:
+              summary: Malformed key
+              value:
+                error: Invalid API key format
+                hint: Get a free API key — 200 calls/day, no payment
+                signup_url: https://madeonsol.com/developer
+                docs_url: https://madeonsol.com/api-docs
+  schemas:
+    DemoKeyNotAllowedError:
+      type: object
+      description: 403 for the public demo key (`msk_demo_…`) outside its three-endpoint allow-list. `endpoint_tier` is the endpoint's real minimum plan (null when unknown).
+      required:
+      - error
+      - message
+      - allowed_endpoints
+      properties:
+        error:
+          type: string
+          enum:
+          - demo_key_endpoint_not_allowed
+        message:
+          type: string
+        endpoint_tier:
+          type: string
+          nullable: true
+          enum:
+          - FREE
+          - PRO
+          - ULTRA
+          - BUSINESS
+          - ENTERPRISE
+          - null
+        allowed_endpoints:
+          type: array
+          items:
+            type: string
+        signup_url:
+          type: string
+          format: uri
+        upgrade_url:
+          type: string
+          format: uri
+          description: Only when the endpoint's tier can be bought at /checkout.
+    ConcurrencyLimitError:
+      type: object
+      description: '429 from the heavy-query limiter: too many heavy requests in flight for this key (`concurrency`) or for the whole server (`capacity`). Clears as soon as in-flight requests finish.'
+      required:
+      - error
+      - error_kind
+      - retry_after_seconds
+      properties:
+        error:
+          type: string
+        error_kind:
+          type: string
+          enum:
+          - concurrency
+          - capacity
+        retry_after_seconds:
+          type: number
+        max_concurrent:
+          type: integer
+        support:
+          type: string
+        _rid:
+          type: string
+    TierRequiredError:
+      type: object
+      description: 403 when the key's tier is below the endpoint's (or a parameter's) gate. `required_tier` matches the operation's `x-madeonsol-tier` or `x-madeonsol-feature-tiers`. ENTERPRISE gates return `contact` instead of `upgrade`.
+      required:
+      - error
+      - message
+      - your_tier
+      - required_tier
+      properties:
+        error:
+          type: string
+          enum:
+          - tier_required
+        message:
+          type: string
+        feature:
+          type: string
+        your_tier:
+          type: string
+          enum:
+          - BASIC
+          - PRO
+          - ULTRA
+          - BUSINESS
+          - ENTERPRISE
+        required_tier:
+          type: string
+          enum:
+          - PRO
+          - ULTRA
+          - BUSINESS
+          - ENTERPRISE
+        upgrade:
+          type: object
+          description: The plan that lifts this limit, with price and a checkout link.
+          properties:
+            tier:
+              type: string
+              enum:
+              - PRO
+              - ULTRA
+              - BUSINESS
+              - ENTERPRISE
+            price_eur_per_month:
+              type: number
+            price_usdc_per_month:
+              type: number
+            daily_limit:
+              type: integer
+            burst_limit:
+              type: integer
+            pitch:
+              type: string
+            url:
+              type: string
+            upgrade_url:
+              type: string
+              format: uri
+            reactivate:
+              type: boolean
+              description: Present (true) when the key's paid subscription has just lapsed and `tier` is the plan it held.
+            prior_tier:
+              type: string
+              enum:
+              - PRO
+              - ULTRA
+              - BUSINESS
+        contact:
+          type: object
+          properties:
+            url:
+              type: string
+            contact_url:
+              type: string
+            pitch:
+              type: string
+        support:
+          type: string
+        _rid:
+          type: string
+    ServiceUnavailableError:
+      type: object
+      description: '503: a temporary capacity or maintenance condition (e.g. a Postgres statement timeout during a partition move, or the API-key lookup itself being unavailable). Retry after `Retry-After` seconds.'
+      required:
+      - error
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+          description: Machine-readable code where one exists, e.g. `auth_backend_unavailable`.
+        error_kind:
+          type: string
+          description: e.g. `statement_timeout`, `auth_backend`
+        retry_after_seconds:
+          type: number
+        retryable:
+          type: boolean
+        support:
+          type: string
+        _rid:
+          type: string
+    RateLimitError:
+      type: object
+      description: '429 when a quota is exhausted: the daily quota, the per-minute burst, or a free-tier network/key-rotation cap. `datasets` is added on `daily` only.'
+      required:
+      - error
+      - error_kind
+      - message
+      - tier
+      - limit
+      - resets_at
+      properties:
+        error:
+          type: string
+          enum:
+          - rate_limit_exceeded
+        error_kind:
+          type: string
+          enum:
+          - daily
+          - burst
+          - ip_cap
+          - ip_rotation
+        message:
+          type: string
+        tier:
+          type: string
+          enum:
+          - BASIC
+          - PRO
+          - ULTRA
+          - BUSINESS
+          - ENTERPRISE
+        limit:
+          type: integer
+        resets_at:
+          type: string
+          format: date-time
+        upgrade:
+          type: object
+          description: The plan that lifts this limit, with price and a checkout link.
+          properties:
+            tier:
+              type: string
+              enum:
+              - PRO
+              - ULTRA
+              - BUSINESS
+              - ENTERPRISE
+            price_eur_per_month:
+              type: number
+            price_usdc_per_month:
+              type: number
+            daily_limit:
+              type: integer
+            burst_limit:
+              type: integer
+            pitch:
+              type: string
+            url:
+              type: string
+            upgrade_url:
+              type: string
+              format: uri
+            reactivate:
+              type: boolean
+              description: Present (true) when the key's paid subscription has just lapsed and `tier` is the plan it held.
+            prior_tier:
+              type: string
+              enum:
+              - PRO
+              - ULTRA
+              - BUSINESS
+        datasets:
+          type: object
+          properties:
+            pitch:
+              type: string
+            url:
+              type: string
+              format: uri
+    Error:
+      type: object
+      description: Generic error envelope. `error` is always present (SDKs match on it). Errors returned after authentication also carry `_rid` and, on paid tiers, `support`; authentication-stage errors (missing/invalid key, origin) carry neither.
+      properties:
+        error:
+          type: string
+          description: Error message or machine code (e.g. `tier_required`, `rate_limit_exceeded`). Never changed once shipped.
+        message:
+          type: string
+          description: Human-readable explanation, when `error` is a machine code.
+        code:
+          type: string
+          description: Machine-readable sub-code on some errors (e.g. `invalid_query`, `invalid_wallet`, `origin_not_allowed`).
+        error_kind:
+          type: string
+          description: Machine-readable category on some errors (e.g. `statement_timeout`, `concurrency`, `daily`).
+        detail:
+          type: string
+          description: Extra human-readable context.
+        hint:
+          type: string
+        retry_after_seconds:
+          type: number
+          description: When present on a 429/503, the same value is sent as the `Retry-After` header.
+        signup_url:
+          type: string
+          format: uri
+          description: 'On the missing-key / bad-format 401: where to get a free key.'
+        docs_url:
+          type: string
+          format: uri
+        support:
+          type: string
+          description: 'Paid tiers, errors after authentication: priority support contact.'
+        _rid:
+          type: string
+          description: Request ID — include when reporting issues
+      required:
+      - error
+    LaunchCoverage:
+      type: object
+      description: 'Dataset-scope disclosure injected on every 200 from the launch-pipeline feeds (`/deployer-hunter/*`, `/sniper/*`, `/alpha/*`, `/tokens/almost-bonded`, `/tokens/batch/risk`, `/wallet/batch/classify`) unless the route already carries a more precise per-subject `coverage`. Static: these datasets are built from launchpad ingest (in practice ~99% pump.fun), so an absent wallet/token, an empty profile or a `false` reputation flag means ''not observed by this pipeline'', never ''clean'' or ''no activity''.'
+      properties:
+        scope:
+          type: string
+          example: launchpad pipeline (pump.fun and LaunchLab/bonk deploys; bags.fm tokens are covered in trade data but their deploys are not attributed here; no direct-to-DEX launches)
+        note:
+          type: string
+          description: How to read absences and zeros in this response.
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: msk_...
+      description: Get a free API key at https://madeonsol.com/developer
+x-madeonsol-tiers:
+- tier: FREE
+  plan: BASIC
+  name: Free
+  price_eur_monthly: 0
+  price_eur_annual: 0
+  price_usd_monthly: 0
+  daily_limit: 200
+  burst_limit: 60
+  url: https://madeonsol.com/developer
+- tier: PRO
+  plan: PRO
+  name: Pro
+  price_eur_monthly: 43
+  price_eur_annual: 430
+  price_usd_monthly: 49
+  daily_limit: 10000
+  burst_limit: 300
+  url: https://madeonsol.com/checkout?tier=PRO
+- tier: ULTRA
+  plan: ULTRA
+  name: Ultra
+  price_eur_monthly: 131
+  price_eur_annual: 1310
+  price_usd_monthly: 149
+  daily_limit: 100000
+  burst_limit: 600
+  url: https://madeonsol.com/checkout?tier=ULTRA
+- tier: BUSINESS
+  plan: BUSINESS
+  name: Business
+  price_eur_monthly: 400
+  price_eur_annual: 4000
+  price_usd_monthly: 456
+  daily_limit: 500000
+  burst_limit: 3000
+  url: https://madeonsol.com/checkout?tier=BUSINESS
+- tier: ENTERPRISE
+  plan: ENTERPRISE
+  name: Enterprise
+  price_eur_monthly: null
+  price_eur_annual: null
+  price_usd_monthly: null
+  daily_limit: null
+  burst_limit: null
+  url: https://madeonsol.com/pricing#enterprise

@@ -1,0 +1,4901 @@
+openapi: 3.2.0
+info:
+  title: MadeOnSol KOL API
+  version: 1.20.0
+  description: Real-time Solana & Robinhood Chain trading intelligence — KOL wallet trades, deployer reputation, token buyer-quality scoring, wallet tracking, and copy-trade signals across both chains (Robinhood Chain paths under `/rhc/*`).
+  contact:
+    name: MadeOnSol
+    url: https://madeonsol.com/contact
+  license:
+    name: Proprietary
+    url: https://madeonsol.com/terms
+servers:
+- url: https://madeonsol.com/api/v1
+  description: Production
+security:
+- BearerAuth: []
+tags:
+- name: KOL
+  description: KOL wallet trade feed, leaderboard, coordination, hot tokens, and per-KOL profile.
+paths:
+  /kol/feed:
+    get:
+      tags:
+      - KOL
+      summary: KOL trade feed (real-time on PRO+; 5-min delay on free)
+      description: Stream-of-consciousness feed of every buy/sell of at least 0.05 SOL (or $3.50 in USDC/USDT) from 2,000+ tracked Solana KOL wallets. Sub-3s latency from on-chain confirmation on PRO and up (and x402 pay-per-call); the free tier serves this feed on a 5-minute delay (response carries delay/as_of).
+      parameters:
+      - name: since
+        in: query
+        schema:
+          type: string
+          format: date-time
+        description: Only trades strictly newer than this ISO8601 time — the poll cursor. Feed back the response's next_since.
+      - name: include
+        in: query
+        schema:
+          type: string
+          enum:
+          - token
+        description: include=token embeds the /token/{mint} snapshot on each row (≤20 distinct mints per page). Runs the sibling handler in-process and embeds its body under its own key; a failing include lands in include_errors and never fails the request; counts as ONE call.
+      - $ref: '#/components/parameters/Limit'
+      - name: before
+        in: query
+        schema:
+          type: string
+          format: date-time
+        description: 'Cursor: return trades strictly older than this ISO timestamp. Use `next_before` from the previous response.'
+      - name: cursor
+        in: query
+        schema:
+          type: string
+          maxLength: 200
+        description: 'PREFERRED pagination (audit F09 follow-up): the `next_cursor` from a previous page — an opaque strict (traded_at, id) keyset, so paging never repeats or skips rows that share a timestamp and progresses with limit=1 through runs of identical timestamps. Malformed or tampered → 400. Cannot be combined with `before=` (400); `before=` stays supported as the legacy bound.'
+      - name: action
+        in: query
+        schema:
+          type: string
+          enum:
+          - buy
+          - sell
+      - name: kol
+        in: query
+        schema:
+          type: string
+        description: Filter by KOL wallet address
+      - name: min_sol
+        in: query
+        schema:
+          type: number
+        description: Min SOL size per trade
+      - name: token_age_max_min
+        in: query
+        schema:
+          type: integer
+        description: Max token age (min) at trade time
+      - name: exclude_sells
+        in: query
+        schema:
+          type: boolean
+          default: false
+        description: Drop sell-side trades
+      - name: min_kol_winrate
+        in: query
+        schema:
+          type: number
+          minimum: 0
+          maximum: 100
+        description: Min 7d winrate of the buying KOL
+      - name: strategy
+        in: query
+        schema:
+          type: string
+          enum:
+          - scalper
+          - day_trader
+          - swing_trader
+          - hodler
+          - mixed
+        description: Filter by auto-classified trader style
+      - name: min_mc_usd
+        in: query
+        schema:
+          type: number
+          minimum: 0
+          maximum: 1000000000000
+        description: 'v1.6: lower bound on market_cap_usd_at_trade. Trades with unknown MC drop out when set.'
+      - name: max_mc_usd
+        in: query
+        schema:
+          type: number
+          minimum: 0
+          maximum: 1000000000000
+        description: 'v1.6: upper bound on market_cap_usd_at_trade.'
+      responses:
+        '200':
+          description: OK. Response includes `next_before` (ISO timestamp of the last row — pass to the `before` param on the next call). Every row carries `token_image_url` and `launchpad` (`pumpfun`/`launchlab`/`bags`, null for non-launchpad mints).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  trades:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/KolTrade'
+                  count:
+                    type: integer
+                  data_age_seconds:
+                    type: integer
+                    nullable: true
+                    description: Seconds since the newest returned row's traded_at; null on an empty page.
+                  next_before:
+                    type: string
+                    format: date-time
+                    nullable: true
+                    description: 'Page-down cursor: pass as `before=` for older rows.'
+                  next_cursor:
+                    type: string
+                    nullable: true
+                    description: Opaque keyset cursor for the next (older) page — pass as `cursor=`. PREFERRED over next_before, which is a strict timestamp bound that skips same-timestamp siblings of the boundary row.
+                  has_more:
+                    type: boolean
+                    description: false only when the feed is exhausted (not merely when the page is short).
+                  scan:
+                    type: object
+                    description: 'Present when a filter had to be applied after the candidate fetch (audit F09): has_more is then false only when the candidates ran out, and scan_truncated=true means the per-request scan budget ran out first — more matches MAY exist past next_cursor.'
+                    properties:
+                      post_filtered:
+                        type: boolean
+                      scanned:
+                        type: integer
+                        description: Candidate rows examined
+                      scan_truncated:
+                        type: boolean
+                        description: The per-request scan budget ran out before `limit` matches — more matches MAY exist past the cursor/offset
+                      scan_budget:
+                        type: integer
+                  next_since:
+                    type: string
+                    format: date-time
+                    nullable: true
+                    description: 'Poll cursor: traded_at of the newest row on this page (or the `since` you sent when the page is empty). Pass as `since=` to fetch only newer rows; if count === limit page down with before= until you pass your previous since.'
+                  since:
+                    type: string
+                    format: date-time
+                    nullable: true
+                    description: Echo of the `since` parameter.
+                  stream:
+                    type: object
+                    description: Pointer to the WebSocket channel that pushes the same rows (`kol:trades`) so you can stop polling.
+                    properties:
+                      channel:
+                        type: string
+                      url:
+                        type: string
+                      docs:
+                        type: string
+                  included:
+                    type: array
+                    items:
+                      type: string
+                      enum:
+                      - token
+                    description: Present only when `include=` was honoured.
+                  include_truncated:
+                    type: object
+                    description: 'Present only when include=token hit the 20-distinct-mint cap: `{ token: [mints not embedded], note }` — those rows carry token:null.'
+                    properties:
+                      token:
+                        type: array
+                        items:
+                          type: string
+                      note:
+                        type: string
+                  include_errors:
+                    type: object
+                    description: 'Present only when an unknown `include=` value was sent: `{ <name>: { status: 400, error } }`.'
+                  delay:
+                    type: string
+                    description: Free tier only — the applied feed delay ("5m").
+                  delay_seconds:
+                    type: integer
+                    description: Free tier only — the delay in seconds (300).
+                  as_of:
+                    type: string
+                    format: date-time
+                    description: Free tier only — the delayed cutoff the page was served at.
+                  delay_note:
+                    type: string
+                    description: Free tier only — plain-words note that PRO+ and x402 are real-time.
+                  upgrade:
+                    type: string
+                    description: Free tier only — pricing URL.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+      x-madeonsol-tier: FREE
+      x-badges:
+      - name: FREE
+        position: after
+        color: '#64748b'
+      operationId: getKolFeed
+      x-operation-id-source: derived
+  /kol/wallets:
+    get:
+      tags:
+      - KOL
+      summary: Tracked KOL roster (all tiers)
+      description: 'The set of Solana wallets every `/kol/*` route is keyed on — address, name, X handle, strategy tag, follower counts, tracked-since. Roster only: performance lives in `/kol/leaderboard` and `/kol/{wallet}`. Added 2026-09-05 (customers guessed /kol/wallets, /kol/list, /kol/roster, /kol/search). The Robinhood Chain roster is `/rhc/kol/leaderboard`.'
+      parameters:
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 200
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          minimum: 0
+          maximum: 5000
+          default: 0
+      - name: active
+        in: query
+        schema:
+          type: string
+          enum:
+          - 'true'
+          - 'false'
+          - all
+          default: 'true'
+        description: Inactive wallets are kept for history but produce no new trades.
+      - name: q
+        in: query
+        schema:
+          type: string
+          maxLength: 40
+        description: Case-insensitive substring match on the KOL name.
+      - name: strategy
+        in: query
+        schema:
+          type: string
+        description: Exact strategy_tag filter.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  wallets:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        wallet_address:
+                          type: string
+                        name:
+                          type: string
+                          nullable: true
+                        twitter_url:
+                          type: string
+                          nullable: true
+                        avatar_url:
+                          type: string
+                          nullable: true
+                        strategy_tag:
+                          type: string
+                          nullable: true
+                        twitter_followers:
+                          type: integer
+                          nullable: true
+                        follow_count:
+                          type: integer
+                          description: MadeOnSol users following this KOL.
+                        is_active:
+                          type: boolean
+                        tracked_since:
+                          type: string
+                          format: date-time
+                          nullable: true
+                  count:
+                    type: integer
+                  total:
+                    type: integer
+                    description: Total matching the filters (for paging).
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+                  has_more:
+                    type: boolean
+                  filters:
+                    type: object
+                    description: Echo of the applied filters.
+                    properties:
+                      active:
+                        type: string
+                        enum:
+                        - 'true'
+                        - 'false'
+                        - all
+                      q:
+                        type: string
+                        nullable: true
+                      strategy:
+                        type: string
+                        nullable: true
+                  note:
+                    type: string
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+      x-madeonsol-tier: FREE
+      x-badges:
+      - name: FREE
+        position: after
+        color: '#64748b'
+      operationId: getKolWallets
+      x-operation-id-source: derived
+  /kol/leaderboard:
+    get:
+      tags:
+      - KOL
+      summary: KOL PnL leaderboard
+      description: Ranked KOL leaderboard with 180 days of trade history. PRO+ can sort by winrate / profit factor / avg ROI / early-entry share / consistency.
+      parameters:
+      - name: period
+        in: query
+        schema:
+          type: string
+          enum:
+          - today
+          - 7d
+          - 30d
+          - 90d
+          - 180d
+          default: 7d
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          minimum: 0
+          maximum: 10000
+          default: 0
+        description: Page start into the filtered ranking
+      - name: sort
+        in: query
+        schema:
+          type: string
+          enum:
+          - pnl
+          - winrate
+          - volume
+          - avg_roi
+          - profit_factor
+          - early_entry_pct
+          - consistency
+          default: pnl
+        description: PRO+
+      - name: strategy
+        in: query
+        schema:
+          type: string
+          enum:
+          - scalper
+          - day_trader
+          - swing_trader
+          - hodler
+          - mixed
+        description: PRO+
+      - name: min_winrate
+        in: query
+        schema:
+          type: number
+          minimum: 0
+          maximum: 100
+        description: PRO+
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  leaderboard:
+                    type: array
+                    items:
+                      allOf:
+                      - $ref: '#/components/schemas/LeaderboardRow'
+                      - type: object
+                        properties:
+                          entry_mc_samples:
+                            type: integer
+                            nullable: true
+                            description: KOL buys with an MC-at-trade over the period (complete SQL aggregate). null only when that aggregate failed (entry_mc_complete=false) — never a fake 0
+                          avg_entry_mc_usd:
+                            type: integer
+                            nullable: true
+                            description: Average MC at entry over those buys; null with 0 samples or when the aggregate failed
+                  pagination:
+                    type: object
+                    properties:
+                      limit:
+                        type: integer
+                      offset:
+                        type: integer
+                      returned:
+                        type: integer
+                      total:
+                        type: integer
+                        description: Rows in the filtered UNIVERSE (see universe) — not all KOLs
+                      has_more:
+                        type: boolean
+                  universe:
+                    type: object
+                    description: 'Pagination walks a FIXED ranked set (audit F19), not every KOL: the top max_size KOLs by realized PnL for the period; sort/strategy/min_winrate re-rank and filter within it.'
+                    properties:
+                      kind:
+                        type: string
+                        enum:
+                        - top_kols_by_realized_pnl
+                      period:
+                        type: string
+                      max_size:
+                        type: integer
+                      size:
+                        type: integer
+                      note:
+                        type: string
+                  entry_mc_window_start:
+                    type: string
+                    format: date-time
+                    nullable: true
+                    description: Start of the entry-MC aggregate window (bucketed to 5 min; null = all time)
+                  entry_mc_complete:
+                    type: boolean
+                    description: false = the entry-MC aggregate failed; per-row entry_mc_samples / avg_entry_mc_usd are null (unknown)
+                  period:
+                    type: string
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: FREE
+      x-badges:
+      - name: FREE
+        position: after
+        color: '#64748b'
+      operationId: getKolLeaderboard
+      x-operation-id-source: derived
+  /kol/{wallet}:
+    get:
+      tags:
+      - KOL
+      summary: Single KOL profile
+      description: Aggregated profile for one KOL wallet — name, twitter, 7d/30d winrate, total PnL, trade count, recent activity. `include` param adds optional sections (PRO+).
+      parameters:
+      - name: wallet
+        in: path
+        required: true
+        schema:
+          type: string
+          example: 2FxiPRPLYX3H84FZkdRiUHDgDm4U5u98etbL4yvZ3qRq
+        description: Solana wallet address (32-44 base58 chars)
+      - name: include
+        in: query
+        schema:
+          type: string
+        description: 'Comma-separated extras: `pnl_by_token`, `recent_winners`, `recent_losers` (PRO+)'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  kol:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      wallet:
+                        type: string
+                      twitter_url:
+                        type: string
+                        nullable: true
+                      strategy_tag:
+                        type: string
+                        nullable: true
+                      auto_strategy_tag:
+                        type: string
+                        nullable: true
+                  stats:
+                    type: object
+                    properties:
+                      pnl:
+                        type: number
+                        description: SOL, sum of returned trades only (not full history)
+                      buy_count:
+                        type: integer
+                      sell_count:
+                        type: integer
+                      volume:
+                        type: number
+                      win_rate:
+                        type: number
+                        description: 0-100. Present only when per-token PnL was computed (needed by `include`)
+                  scores:
+                    type: object
+                    properties:
+                      winrate_7d:
+                        type: number
+                        nullable: true
+                      winrate_30d:
+                        type: number
+                        nullable: true
+                      avg_roi_7d:
+                        type: number
+                        nullable: true
+                      avg_roi_30d:
+                        type: number
+                        nullable: true
+                      profit_factor_7d:
+                        type: number
+                        nullable: true
+                      profit_factor_30d:
+                        type: number
+                        nullable: true
+                      pnl_7d:
+                        type: number
+                        nullable: true
+                      pnl_30d:
+                        type: number
+                        nullable: true
+                      early_entry_pct_30d:
+                        type: number
+                        nullable: true
+                      consistency_7d:
+                        type: number
+                        nullable: true
+                      median_hold_minutes_30d:
+                        type: number
+                        nullable: true
+                      closed_positions_7d:
+                        type: integer
+                      closed_positions_30d:
+                        type: integer
+                      is_heating_up:
+                        type: boolean
+                      is_cold:
+                        type: boolean
+                  peer_ranks:
+                    type: object
+                    properties:
+                      percentile_pnl_7d:
+                        type: number
+                        nullable: true
+                      percentile_winrate_7d:
+                        type: number
+                        nullable: true
+                      percentile_pnl_30d:
+                        type: number
+                        nullable: true
+                      percentile_winrate_30d:
+                        type: number
+                        nullable: true
+                      percentile_early_entry_30d:
+                        type: number
+                        nullable: true
+                  recent_trades:
+                    type: array
+                    description: Up to 100 most recent trades
+                    items:
+                      type: object
+                      properties:
+                        token_mint:
+                          type: string
+                        token_name:
+                          type: string
+                          nullable: true
+                        token_symbol:
+                          type: string
+                          nullable: true
+                        action:
+                          type: string
+                          enum:
+                          - buy
+                          - sell
+                        sol_amount:
+                          type: number
+                        token_amount:
+                          type: number
+                        market_cap_usd_at_trade:
+                          type: number
+                          nullable: true
+                        price_usd_at_trade:
+                          type: number
+                          nullable: true
+                        tx_signature:
+                          type: string
+                        traded_at:
+                          type: string
+                          format: date-time
+                  pnl_by_token:
+                    type: array
+                    description: Only when `include` contains `pnl_by_token`
+                    items:
+                      type: object
+                      properties:
+                        token_mint:
+                          type: string
+                        token_symbol:
+                          type: string
+                        token_name:
+                          type: string
+                        buy_count:
+                          type: integer
+                        sell_count:
+                          type: integer
+                        total_bought:
+                          type: number
+                        total_sold:
+                          type: number
+                        pnl:
+                          type: number
+                        result:
+                          type: string
+                          enum:
+                          - open
+                          - win
+                          - loss
+                        first_trade:
+                          type: string
+                          format: date-time
+                        last_trade:
+                          type: string
+                          format: date-time
+                  recent_winners:
+                    type: array
+                    description: Only when `include` contains `recent_winners` — up to 10, closed positions with pnl > 0
+                    items:
+                      type: object
+                      properties:
+                        token_mint:
+                          type: string
+                        token_symbol:
+                          type: string
+                        token_name:
+                          type: string
+                        pnl:
+                          type: number
+                        roi_pct:
+                          type: number
+                          nullable: true
+                        buy_count:
+                          type: integer
+                        sell_count:
+                          type: integer
+                        first_trade:
+                          type: string
+                          format: date-time
+                        last_trade:
+                          type: string
+                          format: date-time
+                  recent_losers:
+                    type: array
+                    description: Only when `include` contains `recent_losers` — up to 10, closed positions with pnl <= 0
+                    items:
+                      type: object
+                      properties:
+                        token_mint:
+                          type: string
+                        token_symbol:
+                          type: string
+                        token_name:
+                          type: string
+                        pnl:
+                          type: number
+                        roi_pct:
+                          type: number
+                          nullable: true
+                        buy_count:
+                          type: integer
+                        sell_count:
+                          type: integer
+                        first_trade:
+                          type: string
+                          format: date-time
+                        last_trade:
+                          type: string
+                          format: date-time
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '404':
+          description: Wallet not in KOL roster
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: FREE
+      x-badges:
+      - name: FREE
+        position: after
+        color: '#64748b'
+      operationId: getKolByWallet
+      x-operation-id-source: derived
+  /kol/{wallet}/pnl:
+    get:
+      tags:
+      - KOL
+      summary: Per-token PnL breakdown for one KOL
+      description: Trade-by-trade and per-token realised/unrealised PnL for a single KOL over a configurable period.
+      parameters:
+      - name: wallet
+        in: path
+        required: true
+        schema:
+          type: string
+          example: 2FxiPRPLYX3H84FZkdRiUHDgDm4U5u98etbL4yvZ3qRq
+      - name: period
+        in: query
+        schema:
+          type: string
+          enum:
+          - 7d
+          - 30d
+          - 90d
+          - 180d
+          default: 30d
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  kol:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      wallet:
+                        type: string
+                      twitter_url:
+                        type: string
+                        nullable: true
+                      strategy_tag:
+                        type: string
+                        nullable: true
+                  summary:
+                    type: object
+                    properties:
+                      realized_pnl_sol:
+                        type: number
+                      unrealized_pnl_sol:
+                        type: number
+                      total_pnl_sol:
+                        type: number
+                      held_value_sol:
+                        type: number
+                      total_volume_sol:
+                        type: number
+                      tokens_traded:
+                        type: integer
+                      closed_positions:
+                        type: integer
+                      open_positions:
+                        type: integer
+                      held_positions:
+                        type: integer
+                      priced_held_positions:
+                        type: integer
+                      win_count:
+                        type: integer
+                      loss_count:
+                        type: integer
+                      win_rate:
+                        type: number
+                        nullable: true
+                      profit_factor:
+                        type: number
+                        nullable: true
+                      best_trade_pnl_sol:
+                        type: number
+                      worst_trade_pnl_sol:
+                        type: number
+                      avg_roi_pct:
+                        type: number
+                        nullable: true
+                      avg_hold_minutes:
+                        type: number
+                      median_hold_minutes:
+                        type: number
+                      max_drawdown_sol:
+                        type: number
+                  pnl_curve:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        date:
+                          type: string
+                          format: date
+                        day_pnl:
+                          type: number
+                        cumulative_pnl:
+                          type: number
+                        trades:
+                          type: integer
+                  closed_positions:
+                    type: array
+                    description: Up to 50 (max_positions), sorted by the underlying kol_wallet_pnl RPC
+                    items:
+                      type: object
+                      properties:
+                        token_mint:
+                          type: string
+                        token_symbol:
+                          type: string
+                        token_name:
+                          type: string
+                        buy_count:
+                          type: integer
+                        sell_count:
+                          type: integer
+                        bought_sol:
+                          type: number
+                        sold_sol:
+                          type: number
+                        pnl_sol:
+                          type: number
+                        roi_pct:
+                          type: number
+                        still_holding:
+                          type: boolean
+                        held_value_sol:
+                          type: number
+                        unrealized_pnl_sol:
+                          type: number
+                        hold_minutes:
+                          type: number
+                        result:
+                          type: string
+                          enum:
+                          - win
+                          - loss
+                        first_trade:
+                          type: string
+                          format: date-time
+                        last_trade:
+                          type: string
+                          format: date-time
+                  open_positions:
+                    type: array
+                    description: ULTRA only
+                    items:
+                      type: object
+                      properties:
+                        token_mint:
+                          type: string
+                        token_symbol:
+                          type: string
+                        token_name:
+                          type: string
+                        buy_count:
+                          type: integer
+                        bought_sol:
+                          type: number
+                        held_value_sol:
+                          type: number
+                        unrealized_pnl_sol:
+                          type: number
+                        is_priced:
+                          type: boolean
+                        first_buy_at:
+                          type: string
+                          format: date-time
+                  period:
+                    type: string
+                    enum:
+                    - 7d
+                    - 30d
+                    - 90d
+                    - 180d
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: FREE
+      x-badges:
+      - name: FREE
+        position: after
+        color: '#64748b'
+      operationId: getKolByWalletPnl
+      x-operation-id-source: derived
+  /kol/{wallet}/timing:
+    get:
+      tags:
+      - KOL
+      summary: Behavioral timing fingerprint for one KOL
+      description: Hour-of-day and day-of-week activity histograms, plus session inference, for one KOL wallet. Useful for predicting when they'll next trade.
+      parameters:
+      - name: wallet
+        in: path
+        required: true
+        schema:
+          type: string
+          example: 2FxiPRPLYX3H84FZkdRiUHDgDm4U5u98etbL4yvZ3qRq
+      - name: period
+        in: query
+        schema:
+          type: string
+          enum:
+          - 7d
+          - 30d
+          default: 30d
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  kol:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      wallet:
+                        type: string
+                  timing:
+                    type: object
+                    properties:
+                      tokens_traded:
+                        type: integer
+                      positions_closed:
+                        type: integer
+                      avg_hold_minutes:
+                        type: number
+                        nullable: true
+                      median_hold_minutes:
+                        type: number
+                        nullable: true
+                      pct_closed_1h:
+                        type: number
+                        nullable: true
+                        description: 0-100
+                      pct_closed_6h:
+                        type: number
+                        nullable: true
+                        description: 0-100
+                      pct_closed_24h:
+                        type: number
+                        nullable: true
+                        description: 0-100
+                      avg_buy_size_sol:
+                        type: number
+                        nullable: true
+                      avg_sell_size_sol:
+                        type: number
+                        nullable: true
+                      most_active_hours:
+                        type: array
+                        nullable: true
+                        items:
+                          type: integer
+                        description: UTC hours of day, 0-23
+                      hour_distribution:
+                        type: object
+                        nullable: true
+                        description: UTC hour (0-23, as string keys) → trade count
+                        additionalProperties:
+                          type: integer
+                  period:
+                    type: string
+                    enum:
+                    - 7d
+                    - 30d
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: FREE
+      x-badges:
+      - name: FREE
+        position: after
+        color: '#64748b'
+      operationId: getKolByWalletTiming
+      x-operation-id-source: derived
+  /kol/alerts/recent:
+    get:
+      tags:
+      - KOL
+      summary: Recently fired KOL alerts (PRO+)
+      description: Last N coordination-cluster + first-touch alerts emitted by our alert engine. **PRO+** — the feed includes participating KOL wallet addresses. Useful for backtesting alert quality.
+      parameters:
+      - name: window
+        in: query
+        schema:
+          type: string
+          enum:
+          - 1h
+          - 6h
+          - 24h
+          default: 6h
+        description: Lookback window
+      - name: types
+        in: query
+        schema:
+          type: string
+        description: Comma-separated alert types to include (omit for all)
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 30
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  alerts:
+                    type: array
+                    description: Sorted by detected_at DESC (nulls last), then severity. Field set depends on `type`.
+                    items:
+                      type: object
+                      properties:
+                        type:
+                          type: string
+                          enum:
+                          - consensus_cluster
+                          - fresh_token_kol_buy
+                          - heating_up
+                        severity:
+                          type: string
+                          enum:
+                          - high
+                          - medium
+                          - low
+                        detected_at:
+                          type: string
+                          format: date-time
+                          nullable: true
+                          description: null for heating_up
+                        token_mint:
+                          type: string
+                          description: consensus_cluster, fresh_token_kol_buy only
+                        token_symbol:
+                          type: string
+                          nullable: true
+                          description: consensus_cluster, fresh_token_kol_buy only
+                        token_name:
+                          type: string
+                          nullable: true
+                          description: consensus_cluster, fresh_token_kol_buy only
+                        kol_count:
+                          type: integer
+                          description: consensus_cluster only
+                        net_sol_flow:
+                          type: number
+                          description: consensus_cluster only
+                        signal:
+                          type: string
+                          enum:
+                          - accumulating
+                          - distributing
+                          description: consensus_cluster only
+                        time_to_consensus_sec:
+                          type: integer
+                          nullable: true
+                          description: consensus_cluster only
+                        first_buy_at:
+                          type: string
+                          format: date-time
+                          nullable: true
+                          description: consensus_cluster only
+                        market_cap_usd_at_first_buy:
+                          type: number
+                          nullable: true
+                          description: consensus_cluster only
+                        market_cap_usd:
+                          type: number
+                          nullable: true
+                          description: consensus_cluster only, current MC
+                        last_price_usd:
+                          type: number
+                          nullable: true
+                          description: consensus_cluster only
+                        kols:
+                          type: array
+                          description: consensus_cluster only
+                          items:
+                            type: object
+                            properties:
+                              name:
+                                type: string
+                              wallet:
+                                type: string
+                        token_age_minutes:
+                          type: integer
+                          description: fresh_token_kol_buy only
+                        kol_name:
+                          type: string
+                          nullable: true
+                          description: fresh_token_kol_buy, heating_up
+                        wallet:
+                          type: string
+                          description: fresh_token_kol_buy, heating_up only
+                        kol_winrate_7d:
+                          type: number
+                          nullable: true
+                          description: fresh_token_kol_buy only
+                        kol_percentile_pnl_7d:
+                          type: number
+                          nullable: true
+                          description: fresh_token_kol_buy only
+                        sol_amount:
+                          type: number
+                          description: fresh_token_kol_buy only
+                        market_cap_usd_at_trade:
+                          type: number
+                          nullable: true
+                          description: fresh_token_kol_buy only
+                        price_usd_at_trade:
+                          type: number
+                          nullable: true
+                          description: fresh_token_kol_buy only
+                        kol_twitter:
+                          type: string
+                          nullable: true
+                          description: heating_up only
+                        strategy_tag:
+                          type: string
+                          nullable: true
+                          description: heating_up only
+                        winrate_7d:
+                          type: number
+                          nullable: true
+                          description: heating_up only
+                        pnl_7d:
+                          type: number
+                          nullable: true
+                          description: heating_up only
+                        closed_positions_7d:
+                          type: integer
+                          description: heating_up only
+                        percentile_pnl_7d:
+                          type: number
+                          nullable: true
+                          description: heating_up only
+                  count:
+                    type: integer
+                  window:
+                    type: string
+                    enum:
+                    - 1h
+                    - 6h
+                    - 24h
+                  types:
+                    type: array
+                    items:
+                      type: string
+                      enum:
+                      - consensus_cluster
+                      - fresh_token_kol_buy
+                      - heating_up
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: PRO
+      x-badges:
+      - name: PRO
+        position: after
+        color: '#1d4ed8'
+      operationId: getKolAlertsRecent
+      x-operation-id-source: derived
+  /kol/pairs:
+    get:
+      tags:
+      - KOL
+      summary: KOLs who frequently trade together
+      description: Wallet pairs that show high overlap in tokens traded inside short windows. Surfaces social/cabal clusters.
+      parameters:
+      - name: period
+        in: query
+        schema:
+          type: string
+          enum:
+          - 7d
+          - 30d
+          default: 7d
+      - name: min_shared
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 20
+          default: 3
+        description: Minimum shared tokens between the two wallets
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 20
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          minimum: 0
+          maximum: 10000
+          default: 0
+        description: Page start into the ranked list — response includes a `pagination` block
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pairs:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        kol_a:
+                          type: object
+                          properties:
+                            name:
+                              type: string
+                            wallet:
+                              type: string
+                        kol_b:
+                          type: object
+                          properties:
+                            name:
+                              type: string
+                            wallet:
+                              type: string
+                        shared_token_count:
+                          type: integer
+                        agreement_rate:
+                          type: number
+                          description: 0-100, share of shared tokens where both traded in agreement
+                        shared_tokens:
+                          type: array
+                          items:
+                            type: string
+                          description: ULTRA only — the shared token mints
+                  pagination:
+                    type: object
+                    properties:
+                      limit:
+                        type: integer
+                      offset:
+                        type: integer
+                      returned:
+                        type: integer
+                      has_more:
+                        type: boolean
+                  period:
+                    type: string
+                    enum:
+                    - 7d
+                    - 30d
+                  min_shared:
+                    type: integer
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: FREE
+      x-badges:
+      - name: FREE
+        position: after
+        color: '#64748b'
+      operationId: getKolPairs
+      x-operation-id-source: derived
+  /kol/tokens/{mint}:
+    get:
+      tags:
+      - KOL
+      summary: KOL activity on one token
+      description: All KOLs who have traded the given token mint, with sizes, timing, and aggregate buy/sell counts (up to 50 KOLs by net flow).
+      parameters:
+      - name: mint
+        in: path
+        required: true
+        schema:
+          type: string
+          example: FfuWjhMm5LP3anZ5zq8SG4iqzYVvhM4LoyNMM957pump
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token_mint:
+                    type: string
+                  summary:
+                    type: object
+                    properties:
+                      kol_count:
+                        type: integer
+                      total_bought_sol:
+                        type: number
+                      total_sold_sol:
+                        type: number
+                      net_flow_sol:
+                        type: number
+                      signal:
+                        type: string
+                        enum:
+                        - accumulating
+                        - distributing
+                  kols:
+                    type: array
+                    description: Up to 50 KOLs by net flow
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        wallet:
+                          type: string
+                        buy_count:
+                          type: integer
+                        sell_count:
+                          type: integer
+                        total_bought:
+                          type: number
+                        total_sold:
+                          type: number
+                        net_sol:
+                          type: number
+                          description: total_sold − total_bought in SOL (kol_token_flow). Negative = the KOL put more SOL in than it took out (net buyer).
+                        position:
+                          type: string
+                          enum:
+                          - net_buyer
+                          - net_seller
+                          - neutral
+                          description: net_buyer when net_sol < 0, net_seller when net_sol > 0.
+                        first_trade:
+                          type: string
+                          format: date-time
+                        last_trade:
+                          type: string
+                          format: date-time
+                  delay:
+                    type: string
+                    description: BASIC tier only, e.g. "5m" — feed is delayed
+                  delay_seconds:
+                    type: integer
+                    description: BASIC tier only
+                  as_of:
+                    type: string
+                    format: date-time
+                    description: BASIC tier only — aggregates/last_trade exclude rows newer than this
+                  delay_note:
+                    type: string
+                    description: BASIC tier only
+                  upgrade:
+                    type: string
+                    description: BASIC tier only
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '400':
+          description: Invalid mint
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '404':
+          description: Token not seen by our KOL roster
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: FREE
+      x-badges:
+      - name: FREE
+        position: after
+        color: '#64748b'
+      operationId: getKolTokensByMint
+      x-operation-id-source: derived
+  /kol/tokens/{mint}/entry-order:
+    get:
+      tags:
+      - KOL
+      summary: KOL entry order on one token
+      description: Ordered list of KOL first-buys on a token mint — who got in first, second, etc., with timestamps. Each wallet's FIRST buy is chosen in SQL before the limit (a repeat buyer can no longer crowd later first-time buyers out), ordered deterministically by (traded_at, tx_signature, wallet). The x402 twin returns the same body.
+      parameters:
+      - name: mint
+        in: path
+        required: true
+        schema:
+          type: string
+          example: FfuWjhMm5LP3anZ5zq8SG4iqzYVvhM4LoyNMM957pump
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token_mint:
+                    type: string
+                  token_name:
+                    type: string
+                    nullable: true
+                  token_symbol:
+                    type: string
+                    nullable: true
+                  total_kol_buyers:
+                    type: integer
+                    description: Distinct KOL wallets with a first buy on this mint — over ALL KOL buyers (first buy per wallet chosen in SQL before the `limit`)
+                  returned:
+                    type: integer
+                    description: entries.length
+                  has_more:
+                    type: boolean
+                    description: More KOL buyers exist beyond `limit` (max 100)
+                  complete:
+                    type: boolean
+                    enum:
+                    - true
+                    description: Entry order is a complete SQL aggregate (no row-clamped sample)
+                  first_buy_at:
+                    type: string
+                    format: date-time
+                  last_buy_at:
+                    type: string
+                    format: date-time
+                  span_sec:
+                    type: integer
+                  entries:
+                    type: array
+                    description: Ranked first-buy order, capped at `limit`
+                    items:
+                      type: object
+                      properties:
+                        rank:
+                          type: integer
+                        kol_name:
+                          type: string
+                          nullable: true
+                        kol_twitter:
+                          type: string
+                          nullable: true
+                        wallet:
+                          type: string
+                        strategy_tag:
+                          type: string
+                          nullable: true
+                        auto_strategy_tag:
+                          type: string
+                          nullable: true
+                        winrate_7d:
+                          type: number
+                          nullable: true
+                        winrate_30d:
+                          type: number
+                          nullable: true
+                        early_entry_pct_30d:
+                          type: number
+                          nullable: true
+                        percentile_pnl_7d:
+                          type: number
+                          nullable: true
+                        percentile_winrate_7d:
+                          type: number
+                          nullable: true
+                        first_buy_at:
+                          type: string
+                          format: date-time
+                        seconds_after_first:
+                          type: integer
+                        sol_amount:
+                          type: number
+                        token_amount:
+                          type: number
+                        tx_signature:
+                          type: string
+                  delay:
+                    type: string
+                    description: BASIC tier only, e.g. "5m" — feed is delayed
+                  delay_seconds:
+                    type: integer
+                    description: BASIC tier only
+                  as_of:
+                    type: string
+                    format: date-time
+                    description: BASIC tier only — entries newer than this are hidden
+                  delay_note:
+                    type: string
+                    description: BASIC tier only
+                  upgrade:
+                    type: string
+                    description: BASIC tier only
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+      x-madeonsol-tier: FREE
+      x-badges:
+      - name: FREE
+        position: after
+        color: '#64748b'
+      operationId: getKolTokensByMintEntryOrder
+      x-operation-id-source: derived
+  /kol/tokens/trending:
+    get:
+      tags:
+      - KOL
+      summary: Trending tokens by KOL acceleration
+      description: Tokens trending across KOL wallets right now, ranked by raw KOL buy volume (`buy_volume_sol`), buy count and recency inside the window. Complements `/kol/tokens/hot`, which ranks by buy-velocity *acceleration* vs the prior baseline.
+      parameters:
+      - name: period
+        in: query
+        schema:
+          type: string
+          enum:
+          - 5m
+          - 15m
+          - 30m
+          - 1h
+          - 2h
+          - 4h
+          - 12h
+          default: 1h
+        description: Acceleration measurement window
+      - name: min_kols
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 20
+          default: 1
+        description: Minimum distinct KOL buyers
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 20
+        description: Page size (capped at 20 below ULTRA)
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          minimum: 0
+          maximum: 10000
+          default: 0
+        description: Page start into the ranked list — response includes a `pagination` block
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  trending:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        token_mint:
+                          type: string
+                        token_symbol:
+                          type: string
+                        token_name:
+                          type: string
+                        token_image_url:
+                          type: string
+                          nullable: true
+                        buy_volume_sol:
+                          type: number
+                        sell_volume_sol:
+                          type: number
+                        net_flow_sol:
+                          type: number
+                        buy_count:
+                          type: integer
+                        sell_count:
+                          type: integer
+                        kol_count:
+                          type: integer
+                        first_buy_at:
+                          type: string
+                          format: date-time
+                        latest_buy_at:
+                          type: string
+                          format: date-time
+                        latest_buy_age_minutes:
+                          type: integer
+                          nullable: true
+                        kols:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              name:
+                                type: string
+                              wallet:
+                                type: string
+                                description: ULTRA only
+                  pagination:
+                    type: object
+                    properties:
+                      limit:
+                        type: integer
+                        description: 'Page-size cap: 20 below ULTRA'
+                      offset:
+                        type: integer
+                      returned:
+                        type: integer
+                      has_more:
+                        type: boolean
+                  universe:
+                    type: object
+                    description: 'Offset pages walk a FIXED top-N ranked list (audit F19), not every token KOLs traded: has_more=false at the end of the universe does not mean no further token qualified.'
+                    properties:
+                      kind:
+                        type: string
+                        enum:
+                        - top_ranked
+                      max_size:
+                        type: integer
+                      size:
+                        type: integer
+                      truncated_at_max:
+                        type: boolean
+                      note:
+                        type: string
+                  period:
+                    type: string
+                    enum:
+                    - 5m
+                    - 15m
+                    - 30m
+                    - 1h
+                    - 2h
+                    - 4h
+                    - 12h
+                  min_kols:
+                    type: integer
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: FREE
+      x-badges:
+      - name: FREE
+        position: after
+        color: '#64748b'
+      operationId: getKolTokensTrending
+      x-operation-id-source: derived
+  /kol/coordination:
+    get:
+      tags:
+      - KOL
+      summary: Multi-KOL coordination signals (PRO+)
+      description: Detect tokens being traded by multiple KOLs within a window. **PRO+** — the live signal includes participating KOL wallet addresses. 3+ convergent KOLs is often a leading signal. Stablecoins / wSOL / LSTs are always filtered; established memecoins (WIF, BONK, POPCAT) are filtered by default — pass `include_majors=true` to see them. `peak_*` fields describe the densest buy cluster inside the period. Results are sorted by `coordination_score` over a fixed universe — the top 150 clusters by (kol_count DESC, net_sol_flow DESC) — and every filter runs inside it (see `universe`; since 2026-09-21 — previously only the first `limit` clusters, ×3 with filters, were scored).
+      parameters:
+      - name: include
+        in: query
+        schema:
+          type: string
+          enum:
+          - risk
+        description: include=risk embeds /tokens/{mint}/risk on each cluster (≤20 distinct mints). Runs the sibling handler in-process and embeds its body under its own key; a failing include lands in include_errors and never fails the request; counts as ONE call.
+      - name: period
+        in: query
+        schema:
+          type: string
+          enum:
+          - 1h
+          - 6h
+          - 24h
+          - 7d
+          default: 24h
+      - name: min_kols
+        in: query
+        schema:
+          type: integer
+          minimum: 2
+          maximum: 50
+          default: 3
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 20
+      - name: min_avg_winrate
+        in: query
+        schema:
+          type: number
+          minimum: 0
+          maximum: 100
+        description: PRO+
+      - name: unique_strategies
+        in: query
+        schema:
+          type: boolean
+        description: PRO+. true = require the cluster's KOLs to span distinct strategies (the route accepts true|false|1|0; any other value is a 400).
+      - name: include_majors
+        in: query
+        schema:
+          type: boolean
+          default: false
+        description: Include WIF, BONK, POPCAT etc. in results
+      - name: window_minutes
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 60
+          default: 15
+        description: Width of the peak-density window
+      - name: min_score
+        in: query
+        schema:
+          type: integer
+          minimum: 0
+          maximum: 100
+        description: Only return clusters with coordination_score ≥ this value
+      - name: min_mc_usd
+        in: query
+        schema:
+          type: number
+          minimum: 0
+          maximum: 1000000000000
+        description: 'v1.6: lower bound on entry MC (MC at first KOL buy). Tokens with unknown entry MC drop out when set.'
+      - name: max_mc_usd
+        in: query
+        schema:
+          type: number
+          minimum: 0
+          maximum: 1000000000000
+        description: 'v1.6: upper bound on entry MC.'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  coordination:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CoordinationCluster'
+                  period:
+                    type: string
+                  min_kols:
+                    type: integer
+                    description: Echo of the applied min_kols.
+                  window_minutes:
+                    type: integer
+                    description: Echo of the applied peak-density window (minutes).
+                  score_version:
+                    type: string
+                    description: Bumps when score weights change; clients can pin logic to a known version.
+                  universe:
+                    type: object
+                    description: 'The clusters the ranking was computed over (audit F09 follow-up, 2026-09-21): the top `max_size` by (kol_count DESC, net_sol_flow DESC) for the period/min_kols/window. Every filter (min_score, min_avg_winrate, unique_strategies, MC band) and the coordination_score sort run inside this universe, so a filtered result is always a subset of the unfiltered ranking. `truncated_at_max`=true means more clusters exist below the cap.'
+                    properties:
+                      kind:
+                        type: string
+                        enum:
+                        - top_by_kol_count
+                      order:
+                        type: string
+                      max_size:
+                        type: integer
+                      size:
+                        type: integer
+                      truncated_at_max:
+                        type: boolean
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+      x-madeonsol-tier: PRO
+      x-badges:
+      - name: PRO
+        position: after
+        color: '#1d4ed8'
+      operationId: getKolCoordination
+      x-operation-id-source: derived
+  /kol/coordination/alerts:
+    get:
+      tags:
+      - KOL
+      summary: List your coordination alert rules
+      description: 'Returns active + inactive rules for the authenticated user. PRO: 5 rules max. ULTRA: 20 rules max.'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rules:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CoordinationAlertRule'
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Pro/Ultra tier required
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: PRO
+      x-badges:
+      - name: PRO
+        position: after
+        color: '#1d4ed8'
+      operationId: getKolCoordinationAlerts
+      x-operation-id-source: derived
+    post:
+      tags:
+      - KOL
+      summary: Create a coordination alert rule
+      description: 'Rule fires via pg_notify push when a token hits `min_kols` distinct KOL buys inside a rolling `window_minutes` window AND scores >= `min_score`. Cooldown per (rule, token); re-fires early if score jumps >= `score_jump_break`. Delivery: `websocket` (on the `kol:coordination` WS channel), `webhook` (per-rule HMAC), or `both`.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  maxLength: 64
+                min_kols:
+                  type: integer
+                  minimum: 2
+                  maximum: 50
+                  default: 5
+                window_minutes:
+                  type: integer
+                  minimum: 1
+                  maximum: 60
+                  default: 15
+                min_score:
+                  type: integer
+                  minimum: 0
+                  maximum: 100
+                  default: 0
+                include_majors:
+                  type: boolean
+                  default: false
+                cooldown_min:
+                  type: integer
+                  minimum: 1
+                  maximum: 1440
+                  default: 30
+                score_jump_break:
+                  type: integer
+                  minimum: 0
+                  maximum: 100
+                  default: 20
+                  description: Re-fire during cooldown when new score ≥ last_score + this
+                delivery_mode:
+                  type: string
+                  enum:
+                  - websocket
+                  - webhook
+                  - both
+                  default: websocket
+                webhook_url:
+                  type: string
+                  format: uri
+                  description: Required if delivery_mode includes webhook. HTTPS only.
+                min_mc_usd:
+                  type: number
+                  minimum: 0
+                  maximum: 1000000000000
+                  nullable: true
+                  description: 'v1.6: lower bound on entry MC (MC at the triggering trade). Triggers on tokens with unknown MC drop out when set.'
+                max_mc_usd:
+                  type: number
+                  minimum: 0
+                  maximum: 1000000000000
+                  nullable: true
+                  description: 'v1.6: upper bound on entry MC.'
+      responses:
+        '200':
+          description: Rule created. Response includes `webhook_secret` (one-time) if a webhook URL was supplied.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rule:
+                    $ref: '#/components/schemas/CoordinationAlertRule'
+                  webhook_secret:
+                    type: string
+                    nullable: true
+                    description: One-time reveal — only present when a webhook_url was supplied. Use to verify HMAC-SHA256 signatures (X-MadeOnSol-Signature).
+                  note:
+                    type: string
+                    nullable: true
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Pro/Ultra required
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Rule quota reached
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: PRO
+      x-badges:
+      - name: PRO
+        position: after
+        color: '#1d4ed8'
+      operationId: postKolCoordinationAlerts
+      x-operation-id-source: derived
+  /kol/coordination/alerts/{id}:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    get:
+      tags:
+      - KOL
+      summary: Fetch one coordination alert rule
+      description: Fetch one coordination alert rule you own, addressed by the `id` path param (UUID). Returns its KOL set, thresholds, delivery config (webhook / websocket / both), and `is_active` state. 404 if the id doesn't exist or isn't yours.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rule:
+                    $ref: '#/components/schemas/CoordinationAlertRule'
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '404':
+          description: Not found
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: PRO
+      x-badges:
+      - name: PRO
+        position: after
+        color: '#1d4ed8'
+      operationId: getKolCoordinationAlertsById
+      x-operation-id-source: derived
+    patch:
+      tags:
+      - KOL
+      summary: Update fields on a coordination alert rule
+      description: All fields from POST are patchable, plus `is_active` for pause/resume.
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rule:
+                    $ref: '#/components/schemas/CoordinationAlertRule'
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '404':
+          description: Not found
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: PRO
+      x-badges:
+      - name: PRO
+        position: after
+        color: '#1d4ed8'
+      operationId: patchKolCoordinationAlertsById
+      x-operation-id-source: derived
+    delete:
+      tags:
+      - KOL
+      summary: Delete a coordination alert rule
+      description: Permanently delete a coordination alert rule you own, addressed by the `id` path param (UUID). Stops all further alerts from that rule. 404 if the id doesn't exist or isn't yours.
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted:
+                    type: boolean
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '404':
+          description: Not found
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: PRO
+      x-badges:
+      - name: PRO
+        position: after
+        color: '#1d4ed8'
+      operationId: deleteKolCoordinationAlertsById
+      x-operation-id-source: derived
+  /kol/first-touches:
+    get:
+      tags:
+      - KOL
+      summary: Recent first-KOL-touch events
+      description: 'Every ''first KOL buy on a token mint'' event. Filterable by scout tier (S/A/B/C from `mv_kol_scout_score`), KOL winrate, token age, mint suffix. Backtest: top scouts attract ≥3 follow-on KOLs within 4h ~50% of the time vs ~14% baseline. Median lead time before second KOL is 12s — for trading, subscribe to the `kol:first_touches` WebSocket channel (PRO+) rather than polling.'
+      parameters:
+      - name: include
+        in: query
+        schema:
+          type: string
+        description: 'Comma-separated includes: `wallet` and/or `followers_4h`. include=wallet embeds /wallet/{address} for the first-KOL wallet on each event (ULTRA only — the wallet address itself is an ULTRA field here; ≤20 distinct wallets per page). Runs the sibling handler in-process and embeds its body under its own key; a failing include lands in include_errors and never fails the request; counts as ONE call.'
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+      - name: since
+        in: query
+        schema:
+          type: string
+          format: date-time
+        description: Polling cursor — events strictly newer than this
+      - name: before
+        in: query
+        schema:
+          type: string
+          format: date-time
+        description: Pagination cursor — events strictly older than this
+      - name: cursor
+        in: query
+        schema:
+          type: string
+          maxLength: 200
+        description: 'PREFERRED pagination (audit F09 follow-up): the `next_cursor` from a previous page — an opaque strict (first_buy_at, id) keyset, so paging never repeats or skips rows that share a timestamp and progresses with limit=1 through runs of identical timestamps. Malformed or tampered → 400. Cannot be combined with `before=` (400); `before=` stays supported as the legacy bound.'
+      - name: kol
+        in: query
+        schema:
+          type: string
+        description: Filter to one KOL wallet (32-44 base58 chars)
+      - name: min_kol_winrate_7d
+        in: query
+        schema:
+          type: number
+          minimum: 0
+          maximum: 100
+      - name: min_scout_tier
+        in: query
+        schema:
+          type: string
+          enum:
+          - S
+          - A
+          - B
+          - C
+      - name: min_n_touches
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+      - name: strategy
+        in: query
+        schema:
+          type: string
+          enum:
+          - scalper
+          - day_trader
+          - swing_trader
+          - hodler
+          - mixed
+      - name: token_age_max_min
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+      - name: min_first_buy_sol
+        in: query
+        schema:
+          type: number
+          minimum: 0
+      - name: mint_suffix
+        in: query
+        schema:
+          type: string
+        description: e.g. 'pump', 'bonk'
+      - name: preset
+        in: query
+        schema:
+          type: string
+          enum:
+          - scout
+          - fresh_launch
+      - name: min_mc_usd
+        in: query
+        schema:
+          type: number
+          minimum: 0
+          maximum: 1000000000000
+        description: 'v1.6: lower bound on market_cap_usd_at_first_buy. Touches with unknown MC drop out when set.'
+      - name: max_mc_usd
+        in: query
+        schema:
+          type: number
+          minimum: 0
+          maximum: 1000000000000
+        description: 'v1.6: upper bound on market_cap_usd_at_first_buy.'
+      responses:
+        '200':
+          description: OK — returns `{ events, count, next_before, data_age_seconds }`. Each event has `first_kol.{name, winrate_7d, strategy, scout_tier, scout_score, n_first_touches_30d}`. ULTRA also gets `first_kol.wallet`.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        token_mint:
+                          type: string
+                        token_symbol:
+                          type: string
+                          nullable: true
+                        token_name:
+                          type: string
+                          nullable: true
+                        token_image_url:
+                          type: string
+                          nullable: true
+                        first_buy_at:
+                          type: string
+                          format: date-time
+                        sol_amount:
+                          type: number
+                          nullable: true
+                        token_amount:
+                          type: number
+                          nullable: true
+                        tx_signature:
+                          type: string
+                          nullable: true
+                        token_age_minutes:
+                          type: integer
+                          nullable: true
+                          description: Null when the token's first-seen timestamp is unknown
+                        market_cap_usd_at_first_buy:
+                          type: number
+                          nullable: true
+                        price_usd_at_first_buy:
+                          type: number
+                          nullable: true
+                        market_cap_usd:
+                          type: number
+                          nullable: true
+                          description: Current market cap
+                        last_price_usd:
+                          type: number
+                          nullable: true
+                          description: Current price
+                        first_kol:
+                          type: object
+                          properties:
+                            wallet:
+                              type: string
+                              description: ULTRA only
+                            name:
+                              type: string
+                              nullable: true
+                            twitter_url:
+                              type: string
+                              nullable: true
+                              format: uri
+                            winrate_7d:
+                              type: number
+                              nullable: true
+                            strategy:
+                              type: string
+                              nullable: true
+                              enum:
+                              - scalper
+                              - day_trader
+                              - swing_trader
+                              - hodler
+                              - mixed
+                            scout_tier:
+                              type: string
+                              nullable: true
+                              enum:
+                              - S
+                              - A
+                              - B
+                              - C
+                            scout_score:
+                              type: number
+                              nullable: true
+                              description: Alias for swarm_3plus_pct
+                            n_first_touches_30d:
+                              type: integer
+                              nullable: true
+                        followers_4h:
+                          type: integer
+                          description: Only present when include=followers_4h was requested
+                  count:
+                    type: integer
+                  next_before:
+                    type: string
+                    format: date-time
+                    nullable: true
+                    description: Pass as ?before= to page further back
+                  next_cursor:
+                    type: string
+                    nullable: true
+                    description: Opaque keyset cursor for the next (older) page — pass as `cursor=`. PREFERRED over next_before, which is a strict timestamp bound that skips same-timestamp siblings of the boundary row.
+                  has_more:
+                    type: boolean
+                    description: false only when the feed is exhausted (not merely when the page is short).
+                  scan:
+                    type: object
+                    description: 'Present when a filter had to be applied after the candidate fetch (audit F09): has_more is then false only when the candidates ran out, and scan_truncated=true means the per-request scan budget ran out first — more matches MAY exist past next_cursor.'
+                    properties:
+                      post_filtered:
+                        type: boolean
+                      scanned:
+                        type: integer
+                        description: Candidate rows examined
+                      scan_truncated:
+                        type: boolean
+                        description: The per-request scan budget ran out before `limit` matches — more matches MAY exist past the cursor/offset
+                      scan_budget:
+                        type: integer
+                  next_since:
+                    type: string
+                    format: date-time
+                    nullable: true
+                    description: Pass as ?since= to poll only newer rows
+                  since:
+                    type: string
+                    format: date-time
+                    nullable: true
+                  data_age_seconds:
+                    type: integer
+                    nullable: true
+                  stream:
+                    type: object
+                    nullable: true
+                    description: WS stream pointer for kol:first_touches
+                  included:
+                    type: array
+                    items:
+                      type: string
+                    description: Present when include=wallet was honored
+                  include_truncated:
+                    type: object
+                    description: Present when the wallet include capped at 20 distinct wallets
+                  include_errors:
+                    type: object
+                    description: Present when a requested include was invalid or unauthorized (e.g. include=wallet below ULTRA)
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+      x-madeonsol-tier: FREE
+      x-badges:
+      - name: FREE
+        position: after
+        color: '#64748b'
+      operationId: getKolFirstTouches
+      x-operation-id-source: derived
+  /kol/first-touches/subscriptions:
+    get:
+      tags:
+      - KOL
+      summary: List your first-touch webhook subscriptions
+      description: ULTRA and BUSINESS only. Up to 10 active subscriptions per user on ULTRA, 50 on BUSINESS.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  subscriptions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FirstTouchSubscription'
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Ultra tier required
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: ULTRA
+      x-badges:
+      - name: ULTRA
+        position: after
+        color: '#b45309'
+      operationId: getKolFirstTouchesSubscriptions
+      x-operation-id-source: derived
+    post:
+      tags:
+      - KOL
+      summary: Create a first-touch webhook subscription
+      description: ULTRA only. Each event matching `filters` is pushed via the `kol:first_touches` WS channel and/or POSTed to `webhook_url` with HMAC-SHA256 signing (header `X-MadeOnSol-Signature`). Returns `webhook_secret` once when delivery includes webhook — store it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  maxLength: 64
+                filters:
+                  type: object
+                  properties:
+                    kol:
+                      type: string
+                      description: Wallet address (32-44 base58 chars)
+                    mint_suffix:
+                      type: string
+                    min_first_buy_sol:
+                      type: number
+                      minimum: 0
+                    min_scout_tier:
+                      type: string
+                      enum:
+                      - S
+                      - A
+                      - B
+                      - C
+                    min_n_touches:
+                      type: integer
+                      minimum: 1
+                  additionalProperties: false
+                delivery_mode:
+                  type: string
+                  enum:
+                  - websocket
+                  - webhook
+                  - both
+                  default: webhook
+                webhook_url:
+                  type: string
+                  format: uri
+                  description: Required if delivery_mode includes webhook. HTTPS only.
+                min_mc_usd:
+                  type: number
+                  minimum: 0
+                  maximum: 1000000000000
+                  nullable: true
+                  description: 'v1.6: lower bound on first-touch MC. Touches with unknown MC drop out when set.'
+                max_mc_usd:
+                  type: number
+                  minimum: 0
+                  maximum: 1000000000000
+                  nullable: true
+                  description: 'v1.6: upper bound on first-touch MC.'
+      responses:
+        '200':
+          description: Subscription created. Response includes `webhook_secret` (one-time) if a webhook URL was supplied.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  subscription:
+                    $ref: '#/components/schemas/FirstTouchSubscription'
+                  webhook_secret:
+                    type: string
+                    nullable: true
+                    description: One-time reveal — only present when a webhook_url was supplied. Use to verify HMAC-SHA256 signatures (X-MadeOnSol-Signature).
+                  note:
+                    type: string
+                    nullable: true
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Ultra required
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Subscription quota reached (ULTRA 10 / BUSINESS 50 per user)
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: ULTRA
+      x-badges:
+      - name: ULTRA
+        position: after
+        color: '#b45309'
+      operationId: postKolFirstTouchesSubscriptions
+      x-operation-id-source: derived
+  /kol/first-touches/subscriptions/{id}:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    get:
+      tags:
+      - KOL
+      summary: Fetch one first-touch subscription
+      description: Fetch one first-touch subscription you own, addressed by the `id` path param (UUID). Returns its scout-tier / KOL-winrate / token-age filters, delivery mode, and `is_active` state. 404 if the id doesn't exist or isn't yours.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  subscription:
+                    $ref: '#/components/schemas/FirstTouchSubscription'
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '404':
+          description: Not found
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: ULTRA
+      x-badges:
+      - name: ULTRA
+        position: after
+        color: '#b45309'
+      operationId: getKolFirstTouchesSubscriptionsById
+      x-operation-id-source: derived
+    patch:
+      tags:
+      - KOL
+      summary: Update fields on a first-touch subscription
+      description: All fields from POST are patchable, plus `is_active` for pause/resume.
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  subscription:
+                    $ref: '#/components/schemas/FirstTouchSubscription'
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '404':
+          description: Not found
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: ULTRA
+      x-badges:
+      - name: ULTRA
+        position: after
+        color: '#b45309'
+      operationId: patchKolFirstTouchesSubscriptionsById
+      x-operation-id-source: derived
+    delete:
+      tags:
+      - KOL
+      summary: Delete a first-touch subscription
+      description: Permanently delete a first-touch subscription you own, addressed by the `id` path param (UUID). Stops its `kol:first_touches` deliveries. 404 if the id doesn't exist or isn't yours.
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '404':
+          description: Not found
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: ULTRA
+      x-badges:
+      - name: ULTRA
+        position: after
+        color: '#b45309'
+      operationId: deleteKolFirstTouchesSubscriptionsById
+      x-operation-id-source: derived
+  /token/trending:
+    get:
+      tags:
+      - KOL
+      summary: Alias of /kol/tokens/trending
+      description: Same handler as `/kol/tokens/trending`; every query parameter passes through. Added 2026-09-05 because customers on the singular `/token/{mint}` family guess this URL. Prefer the canonical path in new code.
+      responses:
+        '200':
+          description: Identical to /kol/tokens/trending.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: FREE
+      x-badges:
+      - name: FREE
+        position: after
+        color: '#64748b'
+      operationId: getTokenTrending
+      x-operation-id-source: derived
+  /token/hot:
+    get:
+      tags:
+      - KOL
+      summary: Alias of /kol/tokens/hot
+      description: Same handler as `/kol/tokens/hot`; every query parameter passes through. Added 2026-09-05 because customers on the singular `/token/{mint}` family guess this URL. Prefer the canonical path in new code.
+      responses:
+        '200':
+          description: Identical to /kol/tokens/hot.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: FREE
+      x-badges:
+      - name: FREE
+        position: after
+        color: '#64748b'
+      operationId: getTokenHot
+      x-operation-id-source: derived
+  /kol/tokens/hot:
+    get:
+      tags:
+      - KOL
+      summary: Hot tokens by KOL attention
+      description: Tokens where KOL buy velocity has accelerated in the current period vs the prior baseline — each row carries an `acceleration` score, net flow and the participating KOLs. Complements `/kol/tokens/trending`, which ranks by absolute buy volume.
+      parameters:
+      - name: period
+        in: query
+        schema:
+          type: string
+          enum:
+          - 1h
+          - 6h
+          default: 6h
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 20
+        description: Page size (capped at 20 below ULTRA)
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          minimum: 0
+          maximum: 10000
+          default: 0
+        description: Page start into the ranked list — response includes a `pagination` block
+      - name: min_kols
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 20
+        description: Minimum distinct KOL buyers
+      - name: min_avg_winrate
+        in: query
+        schema:
+          type: number
+          minimum: 0
+          maximum: 100
+        description: Minimum average 7d winrate across the buying KOLs
+      - name: unique_strategies
+        in: query
+        schema:
+          type: boolean
+        description: Require the buyers to span distinct trader strategies
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  hot_tokens:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        token_mint:
+                          type: string
+                        token_symbol:
+                          type: string
+                        token_name:
+                          type: string
+                        token_image_url:
+                          type: string
+                          nullable: true
+                        kols_total:
+                          type: integer
+                        kols_recent:
+                          type: integer
+                        acceleration:
+                          type: number
+                          description: kols_recent vs the prior baseline
+                        total_buy_sol:
+                          type: number
+                        total_sell_sol:
+                          type: number
+                        net_flow:
+                          type: number
+                        first_kol_buy_at:
+                          type: string
+                          format: date-time
+                        first_kol_buy_age_minutes:
+                          type: integer
+                          nullable: true
+                        last_kol_buy_at:
+                          type: string
+                          format: date-time
+                          nullable: true
+                        time_to_consensus_sec:
+                          type: integer
+                          nullable: true
+                        avg_winrate_7d:
+                          type: number
+                          nullable: true
+                        entry_rank_avg:
+                          type: number
+                          nullable: true
+                        unique_strategies:
+                          type: integer
+                        strategies:
+                          type: array
+                          items:
+                            type: string
+                        kols:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              name:
+                                type: string
+                              wallet:
+                                type: string
+                                description: ULTRA only
+                  pagination:
+                    type: object
+                    properties:
+                      limit:
+                        type: integer
+                        description: 'Page-size cap: 20 below ULTRA'
+                      offset:
+                        type: integer
+                      returned:
+                        type: integer
+                      has_more:
+                        type: boolean
+                  period:
+                    type: string
+                    enum:
+                    - 1h
+                    - 6h
+                  min_kols:
+                    type: integer
+                  min_avg_winrate:
+                    type: number
+                    description: Echoed only when the `min_avg_winrate` param was provided
+                  unique_strategies:
+                    type: boolean
+                    description: Top-level echo of the `unique_strategies` request param — present (as true) only when it was set. Distinct from the per-row integer field of the same name inside hot_tokens[].
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: FREE
+      x-badges:
+      - name: FREE
+        position: after
+        color: '#64748b'
+      operationId: getKolTokensHot
+      x-operation-id-source: derived
+  /kol/compare:
+    get:
+      tags:
+      - KOL
+      summary: Compare 2-4 KOL wallets (5 on ULTRA)
+      description: Side-by-side stats (PnL, winrate, volume, trade count) plus shared-token overlap (last 30d) for multiple KOL wallets.
+      parameters:
+      - name: wallets
+        in: query
+        required: true
+        schema:
+          type: string
+        description: 2-4 comma-separated wallet addresses (5 on ULTRA)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  profiles:
+                    type: array
+                    description: 'One entry per requested wallet, in the order given. Wallets not in the active KOL roster return only `wallet` and `found: false`.'
+                    items:
+                      type: object
+                      properties:
+                        wallet:
+                          type: string
+                        found:
+                          type: boolean
+                        name:
+                          type: string
+                        twitter_url:
+                          type: string
+                          nullable: true
+                        strategy_tag:
+                          type: string
+                          nullable: true
+                        auto_strategy_tag:
+                          type: string
+                          nullable: true
+                        winrate_7d:
+                          type: number
+                          nullable: true
+                        winrate_30d:
+                          type: number
+                          nullable: true
+                        avg_roi_7d:
+                          type: number
+                          nullable: true
+                        avg_roi_30d:
+                          type: number
+                          nullable: true
+                        profit_factor_7d:
+                          type: number
+                          nullable: true
+                        profit_factor_30d:
+                          type: number
+                          nullable: true
+                        pnl_7d:
+                          type: number
+                          nullable: true
+                        pnl_30d:
+                          type: number
+                          nullable: true
+                        early_entry_pct_30d:
+                          type: number
+                          nullable: true
+                        consistency_7d:
+                          type: number
+                          nullable: true
+                        median_hold_minutes_30d:
+                          type: number
+                          nullable: true
+                        closed_positions_7d:
+                          type: integer
+                        closed_positions_30d:
+                          type: integer
+                        is_heating_up:
+                          type: boolean
+                        is_cold:
+                          type: boolean
+                        percentile_pnl_7d:
+                          type: number
+                          nullable: true
+                        percentile_winrate_7d:
+                          type: number
+                          nullable: true
+                        percentile_pnl_30d:
+                          type: number
+                          nullable: true
+                        percentile_winrate_30d:
+                          type: number
+                          nullable: true
+                        percentile_early_entry_30d:
+                          type: number
+                          nullable: true
+                  overlap_meta:
+                    type: object
+                    description: 'What overlap covers (audit F11): the top `returned` of `total` qualifying tokens from ONE complete SQL aggregate over the window (no row-clamped sample). Same on the x402 twin.'
+                    properties:
+                      window_start:
+                        type: string
+                        format: date-time
+                      min_wallets:
+                        type: integer
+                      total:
+                        type: integer
+                        nullable: true
+                        description: All qualifying tokens; null when the aggregate failed
+                      returned:
+                        type: integer
+                      has_more:
+                        type: boolean
+                        nullable: true
+                      complete:
+                        type: boolean
+                        description: false = the overlap aggregate failed; overlap is then empty/unknown, not "no overlap"
+                  overlap:
+                    type: array
+                    description: Tokens bought by 2+ of the given wallets in the last 30d, top 25 by wallet-count then buy-count
+                    items:
+                      type: object
+                      properties:
+                        token_mint:
+                          type: string
+                        token_symbol:
+                          type: string
+                          nullable: true
+                        token_name:
+                          type: string
+                          nullable: true
+                        wallets:
+                          type: array
+                          items:
+                            type: string
+                        buy_count:
+                          type: integer
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: FREE
+      x-badges:
+      - name: FREE
+        position: after
+        color: '#64748b'
+      operationId: getKolCompare
+      x-operation-id-source: derived
+  /kol/scouts/leaderboard:
+    get:
+      tags:
+      - KOL
+      summary: Scout KOL leaderboard (PRO+)
+      description: PRO+ (BASIC gets 403; ULTRA-only until 2026-09-12). Ranked leaderboard of KOLs by scout quality — first-touch volume and swarm follow-on rates (% of a scout's first touches that drew ≥3 / ≥5 other KOLs). Filterable by scout tier. `scout_score` is an alias for the primary ranking column `swarm_3plus_pct`.
+      parameters:
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+      - name: scout_tier
+        in: query
+        schema:
+          type: string
+          enum:
+          - S
+          - A
+          - B
+          - C
+        description: Filter by scout tier
+      - name: sort
+        in: query
+        schema:
+          type: string
+          enum:
+          - scout_score
+          - swarm_3plus_pct
+          - swarm_5plus_pct
+          - n_first_touches_30d
+          default: swarm_3plus_pct
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  scouts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        wallet:
+                          type: string
+                        name:
+                          type: string
+                          nullable: true
+                        avatar_url:
+                          type: string
+                          nullable: true
+                        twitter_url:
+                          type: string
+                          nullable: true
+                          format: uri
+                        scout_tier:
+                          type: string
+                          nullable: true
+                          enum:
+                          - S
+                          - A
+                          - B
+                          - C
+                        first_touches_30d:
+                          type: integer
+                          nullable: true
+                        avg_followers_4h:
+                          type: number
+                          nullable: true
+                        swarm_3plus_pct:
+                          type: number
+                          nullable: true
+                          description: '% of first touches that drew ≥3 other KOLs within 4h'
+                        swarm_5plus_pct:
+                          type: number
+                          nullable: true
+                          description: '% of first touches that drew ≥5 other KOLs within 4h'
+                        computed_at:
+                          type: string
+                          format: date-time
+                  count:
+                    type: integer
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: PRO
+      x-badges:
+      - name: PRO
+        position: after
+        color: '#1d4ed8'
+      operationId: getKolScoutsLeaderboard
+      x-operation-id-source: derived
+  /kol/coordination/history:
+    get:
+      tags:
+      - KOL
+      summary: Historical coordination clusters
+      description: Past coordination clusters (deduped per token), each with its peak coordination_score, total_fires, distinct kol_buyers, and the token's current market cap + price. Useful for reviewing which tokens KOLs converged on. PRO+ (ULTRA-only until 2026-09-12).
+      parameters:
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+      - name: since
+        in: query
+        schema:
+          type: string
+          format: date-time
+        description: Only clusters detected after this timestamp
+      - name: min_score
+        in: query
+        schema:
+          type: integer
+          minimum: 0
+          maximum: 100
+        description: Minimum coordination_score
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        token_mint:
+                          type: string
+                        fired_at:
+                          type: string
+                          format: date-time
+                          description: Most recent fire time for this token
+                        coordination_score:
+                          type: integer
+                          description: Highest score observed across the token's fires
+                        total_fires:
+                          type: integer
+                        kol_buyers:
+                          type: integer
+                          description: Distinct KOL wallets that bought the token
+                        current_mc_usd:
+                          type: number
+                          nullable: true
+                        current_price_usd:
+                          type: number
+                          nullable: true
+                  count:
+                    type: integer
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: PRO
+      x-badges:
+      - name: PRO
+        position: after
+        color: '#1d4ed8'
+      operationId: getKolCoordinationHistory
+      x-operation-id-source: derived
+components:
+  headers:
+    XRateLimitReset:
+      description: When the window resets, as a Unix epoch in SECONDS (next 00:00 UTC for the daily quota; about 60 s ahead for a per-minute bucket).
+      schema:
+        type: integer
+      example: 1791158400
+    XRateLimitRemaining:
+      description: Calls left in that window. `0` on a quota 429.
+      schema:
+        type: integer
+        minimum: 0
+      example: 9412
+    XDataDelay:
+      description: 'Free-tier only: the feed in this body is delayed by this many seconds (same value as the body''s `delay_seconds`). Absent on real-time responses.'
+      schema:
+        type: integer
+        minimum: 1
+      example: 300
+    XRateLimitLimit:
+      description: 'Size of the rate-limit window this call was counted against: the daily quota for your tier on data endpoints, the per-minute bucket on `/stream/token` (10) and `/stream/sessions` (30), the hourly allowance for the public demo key. Sent once the key has been authenticated and rate-limited, so it is absent on authentication-stage errors.'
+      schema:
+        type: integer
+        minimum: 0
+      example: 10000
+    XMadeOnSolQuotaWarning:
+      description: 'Free-tier only, past about 70 % of the daily quota: a human-readable usage line with an upgrade link.'
+      schema:
+        type: string
+      example: '150/200 used - upgrade for 50x higher limits: https://madeonsol.com/checkout?tier=PRO'
+    XRequestId:
+      description: Unique id of this response. On responses built after authentication it is also the `request_id` of the audit-log row for the call, so quote it in a support request. Present on every response of the keyed API.
+      required: true
+      schema:
+        type: string
+        format: uuid
+      example: 3f6c1d2e-8a4b-4f7e-9c21-5b0d7e6a9f13
+    XRateLimitUsed:
+      description: Calls used in that window (`limit − remaining`).
+      schema:
+        type: integer
+        minimum: 0
+      example: 588
+    RetryAfter:
+      description: Seconds to wait before retrying (RFC 9110 delay-seconds, at least 1). Sent on every 429 (quota, concurrency, authentication-failure) and every 503; when the body carries `retry_after_seconds` it is the same value.
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+      example: 10
+  schemas:
+    DemoKeyNotAllowedError:
+      type: object
+      description: 403 for the public demo key (`msk_demo_…`) outside its three-endpoint allow-list. `endpoint_tier` is the endpoint's real minimum plan (null when unknown).
+      required:
+      - error
+      - message
+      - allowed_endpoints
+      properties:
+        error:
+          type: string
+          enum:
+          - demo_key_endpoint_not_allowed
+        message:
+          type: string
+        endpoint_tier:
+          type: string
+          nullable: true
+          enum:
+          - FREE
+          - PRO
+          - ULTRA
+          - BUSINESS
+          - ENTERPRISE
+          - null
+        allowed_endpoints:
+          type: array
+          items:
+            type: string
+        signup_url:
+          type: string
+          format: uri
+        upgrade_url:
+          type: string
+          format: uri
+          description: Only when the endpoint's tier can be bought at /checkout.
+    ConcurrencyLimitError:
+      type: object
+      description: '429 from the heavy-query limiter: too many heavy requests in flight for this key (`concurrency`) or for the whole server (`capacity`). Clears as soon as in-flight requests finish.'
+      required:
+      - error
+      - error_kind
+      - retry_after_seconds
+      properties:
+        error:
+          type: string
+        error_kind:
+          type: string
+          enum:
+          - concurrency
+          - capacity
+        retry_after_seconds:
+          type: number
+        max_concurrent:
+          type: integer
+        support:
+          type: string
+        _rid:
+          type: string
+    TierRequiredError:
+      type: object
+      description: 403 when the key's tier is below the endpoint's (or a parameter's) gate. `required_tier` matches the operation's `x-madeonsol-tier` or `x-madeonsol-feature-tiers`. ENTERPRISE gates return `contact` instead of `upgrade`.
+      required:
+      - error
+      - message
+      - your_tier
+      - required_tier
+      properties:
+        error:
+          type: string
+          enum:
+          - tier_required
+        message:
+          type: string
+        feature:
+          type: string
+        your_tier:
+          type: string
+          enum:
+          - BASIC
+          - PRO
+          - ULTRA
+          - BUSINESS
+          - ENTERPRISE
+        required_tier:
+          type: string
+          enum:
+          - PRO
+          - ULTRA
+          - BUSINESS
+          - ENTERPRISE
+        upgrade:
+          type: object
+          description: The plan that lifts this limit, with price and a checkout link.
+          properties:
+            tier:
+              type: string
+              enum:
+              - PRO
+              - ULTRA
+              - BUSINESS
+              - ENTERPRISE
+            price_eur_per_month:
+              type: number
+            price_usdc_per_month:
+              type: number
+            daily_limit:
+              type: integer
+            burst_limit:
+              type: integer
+            pitch:
+              type: string
+            url:
+              type: string
+            upgrade_url:
+              type: string
+              format: uri
+            reactivate:
+              type: boolean
+              description: Present (true) when the key's paid subscription has just lapsed and `tier` is the plan it held.
+            prior_tier:
+              type: string
+              enum:
+              - PRO
+              - ULTRA
+              - BUSINESS
+        contact:
+          type: object
+          properties:
+            url:
+              type: string
+            contact_url:
+              type: string
+            pitch:
+              type: string
+        support:
+          type: string
+        _rid:
+          type: string
+    CoordinationAlertRule:
+      type: object
+      description: A saved /kol/coordination/alerts rule. `created_at` is present on list/GET-one responses; `updated_at` is present on GET-one/PATCH responses (list omits it).
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          nullable: true
+        min_kols:
+          type: integer
+        window_minutes:
+          type: integer
+        min_score:
+          type: integer
+        include_majors:
+          type: boolean
+        cooldown_min:
+          type: integer
+        score_jump_break:
+          type: integer
+        delivery_mode:
+          type: string
+          enum:
+          - websocket
+          - webhook
+          - both
+        webhook_url:
+          type: string
+          format: uri
+          nullable: true
+        min_mc_usd:
+          type: number
+          nullable: true
+        max_mc_usd:
+          type: number
+          nullable: true
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ServiceUnavailableError:
+      type: object
+      description: '503: a temporary capacity or maintenance condition (e.g. a Postgres statement timeout during a partition move, or the API-key lookup itself being unavailable). Retry after `Retry-After` seconds.'
+      required:
+      - error
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+          description: Machine-readable code where one exists, e.g. `auth_backend_unavailable`.
+        error_kind:
+          type: string
+          description: e.g. `statement_timeout`, `auth_backend`
+        retry_after_seconds:
+          type: number
+        retryable:
+          type: boolean
+        support:
+          type: string
+        _rid:
+          type: string
+    LeaderboardRow:
+      type: object
+      properties:
+        name:
+          type: string
+        wallet:
+          type: string
+        pnl:
+          type: number
+          description: Realized PnL in SOL
+        buy_count:
+          type: integer
+        sell_count:
+          type: integer
+        volume:
+          type: number
+        win_rate:
+          type: number
+          description: 0-100
+        median_hold_minutes_30d:
+          type: number
+          nullable: true
+          description: Median hold time in minutes over the last 30 days.
+        percentile_early_entry_30d:
+          type: number
+          nullable: true
+          minimum: 0
+          maximum: 100
+          description: Percentile rank for early entry timing over the last 30 days.
+    KolTrade:
+      type: object
+      properties:
+        wallet_address:
+          type: string
+        kol_name:
+          type: string
+        kol_twitter:
+          type: string
+          format: uri
+          nullable: true
+        token_mint:
+          type: string
+        token_name:
+          type: string
+          nullable: true
+        token_symbol:
+          type: string
+          nullable: true
+        action:
+          type: string
+          enum:
+          - buy
+          - sell
+        sol_amount:
+          type: number
+        token_amount:
+          type: number
+        market_cap_usd_at_trade:
+          type: number
+          nullable: true
+          description: Token market cap in USD at the moment of trade (real-time, from our in-memory price tracker — not the post-hoc Dexscreener spot)
+        price_usd_at_trade:
+          type: number
+          nullable: true
+          description: Token price in USD at the moment of trade
+        tx_signature:
+          type: string
+        traded_at:
+          type: string
+          format: date-time
+        token_image_url:
+          type: string
+          nullable: true
+        launchpad:
+          type: string
+          nullable: true
+          description: Launchpad of origin (`pumpfun` / `launchlab` / `bags`); null for non-launchpad mints.
+        token_age_minutes:
+          type: integer
+          nullable: true
+          description: Minutes between the token's first observed trade and now (not at trade time); null when the mint has no first-seen record.
+        kol_strategy_tag:
+          type: string
+          nullable: true
+          description: Manual strategy tag from the roster, falling back to the auto-classified tag.
+        kol_auto_strategy_tag:
+          type: string
+          nullable: true
+          enum:
+          - scalper
+          - day_trader
+          - swing_trader
+          - hodler
+          - mixed
+          - null
+          description: Auto-classified trader style — the value `strategy=` filters on.
+        kol_winrate_7d:
+          type: number
+          nullable: true
+          description: KOL's 7-day win rate (0-100).
+        kol_winrate_30d:
+          type: number
+          nullable: true
+          description: KOL's 30-day win rate (0-100).
+        kol_early_entry_pct_30d:
+          type: number
+          nullable: true
+          description: Share of the KOL's 30-day buys that were early entries.
+        kol_is_heating_up:
+          type: boolean
+          description: KOL's recent performance is trending up vs their own baseline.
+        kol_percentile_pnl_7d:
+          type: number
+          nullable: true
+          description: KOL's 7-day PnL percentile across the roster (0-100).
+        kol_percentile_winrate_7d:
+          type: number
+          nullable: true
+          description: KOL's 7-day win-rate percentile across the roster (0-100).
+        deployer:
+          type: object
+          description: Present only when the token has a tracked deployer.
+          properties:
+            wallet:
+              type: string
+            tier:
+              type: string
+              nullable: true
+              enum:
+              - elite
+              - good
+              - moderate
+              - rising
+              - cold
+              - unranked
+              - null
+            bonding_rate:
+              type: number
+              nullable: true
+        deployer_tier:
+          type: string
+          nullable: true
+          description: Shortcut for `deployer.tier`; present only when `deployer` is.
+        token:
+          type: object
+          nullable: true
+          description: Present only with `include=token` — the `/token/{mint}` snapshot for this row (null past the 20-distinct-mint cap).
+    RateLimitError:
+      type: object
+      description: '429 when a quota is exhausted: the daily quota, the per-minute burst, or a free-tier network/key-rotation cap. `datasets` is added on `daily` only.'
+      required:
+      - error
+      - error_kind
+      - message
+      - tier
+      - limit
+      - resets_at
+      properties:
+        error:
+          type: string
+          enum:
+          - rate_limit_exceeded
+        error_kind:
+          type: string
+          enum:
+          - daily
+          - burst
+          - ip_cap
+          - ip_rotation
+        message:
+          type: string
+        tier:
+          type: string
+          enum:
+          - BASIC
+          - PRO
+          - ULTRA
+          - BUSINESS
+          - ENTERPRISE
+        limit:
+          type: integer
+        resets_at:
+          type: string
+          format: date-time
+        upgrade:
+          type: object
+          description: The plan that lifts this limit, with price and a checkout link.
+          properties:
+            tier:
+              type: string
+              enum:
+              - PRO
+              - ULTRA
+              - BUSINESS
+              - ENTERPRISE
+            price_eur_per_month:
+              type: number
+            price_usdc_per_month:
+              type: number
+            daily_limit:
+              type: integer
+            burst_limit:
+              type: integer
+            pitch:
+              type: string
+            url:
+              type: string
+            upgrade_url:
+              type: string
+              format: uri
+            reactivate:
+              type: boolean
+              description: Present (true) when the key's paid subscription has just lapsed and `tier` is the plan it held.
+            prior_tier:
+              type: string
+              enum:
+              - PRO
+              - ULTRA
+              - BUSINESS
+        datasets:
+          type: object
+          properties:
+            pitch:
+              type: string
+            url:
+              type: string
+              format: uri
+    CoordinationCluster:
+      type: object
+      properties:
+        token_mint:
+          type: string
+        token_symbol:
+          type: string
+          nullable: true
+        token_name:
+          type: string
+          nullable: true
+        kol_count:
+          type: integer
+        total_buys:
+          type: integer
+        total_sells:
+          type: integer
+        net_sol_flow:
+          type: number
+        signal:
+          type: string
+          enum:
+          - accumulating
+          - distributing
+        avg_winrate_7d:
+          type: number
+          nullable: true
+          description: Mean 7d winrate across the cluster's KOLs
+        entry_rank_avg:
+          type: number
+          nullable: true
+          description: Avg early-entry percentile (lower = earlier in the trade)
+        unique_strategies:
+          type: integer
+          description: Count of distinct auto_strategy_tag values across the KOLs
+        strategies:
+          type: array
+          items:
+            type: string
+        first_buy_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_buy_at:
+          type: string
+          format: date-time
+          nullable: true
+        time_to_consensus_sec:
+          type: integer
+          nullable: true
+          description: Seconds between first and last KOL buy (full-period span)
+        peak_window_start:
+          type: string
+          format: date-time
+          nullable: true
+          description: Start of densest buy cluster (default 15-min window)
+        peak_window_end:
+          type: string
+          format: date-time
+          nullable: true
+        peak_kols:
+          type: integer
+          nullable: true
+          description: Distinct KOLs buying inside the peak window
+        peak_buys:
+          type: integer
+          nullable: true
+          description: Total buys inside the peak window
+        exited_count:
+          type: integer
+          description: KOLs in the cluster whose sell_sol > buy_sol (net-flow-negative)
+        holders_count:
+          type: integer
+          description: kol_count − exited_count (still net-long)
+        coordination_score:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Composite 0-100 signal score. Weighting exposed via top-level score_version.
+        market_cap_usd_at_first_buy:
+          type: number
+          nullable: true
+          description: Market cap (USD) stamped on the cluster's chronologically-first KOL buy. Distinguishes coordinated accumulation at micro-cap from late-stage chasing.
+        market_cap_usd:
+          type: number
+          nullable: true
+          description: Current market cap (USD) of the token, sourced from token_prices. Compare against market_cap_usd_at_first_buy for the cluster's MC delta.
+        last_price_usd:
+          type: number
+          nullable: true
+          description: Current last-trade price (USD).
+        mc_change_pct:
+          type: object
+          description: Market-cap % change over each window (e.g. 12.4 = +12.4%). Sparse — only windows with enough mc-tracker history are present. Use to tell whether the cluster is firing into a moving token or before the move.
+          properties:
+            5m:
+              type: number
+              nullable: true
+            15m:
+              type: number
+              nullable: true
+            1h:
+              type: number
+              nullable: true
+            2h:
+              type: number
+              nullable: true
+            4h:
+              type: number
+              nullable: true
+        volume_usd:
+          type: object
+          description: Organic (non-MEV) USD volume over each window. Sparse — same gating as mc_change_pct.
+          properties:
+            5m:
+              type: number
+            15m:
+              type: number
+            1h:
+              type: number
+            2h:
+              type: number
+            4h:
+              type: number
+        mev_volume_pct:
+          type: object
+          description: MEV-share of total volume over each window (0-100). High value = bot-heavy / sandwich-heavy flow.
+          properties:
+            5m:
+              type: number
+              nullable: true
+            15m:
+              type: number
+              nullable: true
+            1h:
+              type: number
+              nullable: true
+            2h:
+              type: number
+              nullable: true
+            4h:
+              type: number
+              nullable: true
+        history_age_seconds:
+          type: integer
+          nullable: true
+          description: Seconds of mc-tracker history available for this token (capped at 4h05m). Tells you which windows can be trusted. Null when token is untracked.
+        kols:
+          type: array
+          items: {}
+          description: 'BASIC: array of KOL names (first 3). PRO+: objects {name, wallet, buy_sol, sell_sol, exited} — full wallet addresses on every tier that can call the endpoint (BASIC gets 403 on /kol/coordination).'
+    Error:
+      type: object
+      description: Generic error envelope. `error` is always present (SDKs match on it). Errors returned after authentication also carry `_rid` and, on paid tiers, `support`; authentication-stage errors (missing/invalid key, origin) carry neither.
+      properties:
+        error:
+          type: string
+          description: Error message or machine code (e.g. `tier_required`, `rate_limit_exceeded`). Never changed once shipped.
+        message:
+          type: string
+          description: Human-readable explanation, when `error` is a machine code.
+        code:
+          type: string
+          description: Machine-readable sub-code on some errors (e.g. `invalid_query`, `invalid_wallet`, `origin_not_allowed`).
+        error_kind:
+          type: string
+          description: Machine-readable category on some errors (e.g. `statement_timeout`, `concurrency`, `daily`).
+        detail:
+          type: string
+          description: Extra human-readable context.
+        hint:
+          type: string
+        retry_after_seconds:
+          type: number
+          description: When present on a 429/503, the same value is sent as the `Retry-After` header.
+        signup_url:
+          type: string
+          format: uri
+          description: 'On the missing-key / bad-format 401: where to get a free key.'
+        docs_url:
+          type: string
+          format: uri
+        support:
+          type: string
+          description: 'Paid tiers, errors after authentication: priority support contact.'
+        _rid:
+          type: string
+          description: Request ID — include when reporting issues
+      required:
+      - error
+    FirstTouchSubscription:
+      type: object
+      description: A saved /kol/first-touches/subscriptions subscription. `created_at` is present on list/GET-one/PATCH responses; `updated_at` is present on GET-one/PATCH responses (list omits it).
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          nullable: true
+        filters:
+          type: object
+          properties:
+            kol:
+              type: string
+              nullable: true
+              description: Wallet address (32-44 base58 chars)
+            mint_suffix:
+              type: string
+              nullable: true
+            min_first_buy_sol:
+              type: number
+              nullable: true
+            min_scout_tier:
+              type: string
+              nullable: true
+              enum:
+              - S
+              - A
+              - B
+              - C
+            min_n_touches:
+              type: integer
+              nullable: true
+        delivery_mode:
+          type: string
+          enum:
+          - websocket
+          - webhook
+          - both
+        webhook_url:
+          type: string
+          format: uri
+          nullable: true
+        min_mc_usd:
+          type: number
+          nullable: true
+        max_mc_usd:
+          type: number
+          nullable: true
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+  responses:
+    ServiceUnavailable:
+      description: 'Temporarily unavailable — a Postgres statement timeout while the dataset is under load or maintenance (`statement_timeout`, with `X-RateLimit-*` and `_rid`), or the API-key lookup itself unavailable (`auth_backend_unavailable`, authentication stage: no `X-RateLimit-*`, no `_rid`, not counted as a failed authentication). Always carries `Retry-After`; honour it.'
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        X-RateLimit-Limit:
+          $ref: '#/components/headers/XRateLimitLimit'
+        X-RateLimit-Remaining:
+          $ref: '#/components/headers/XRateLimitRemaining'
+        X-RateLimit-Used:
+          $ref: '#/components/headers/XRateLimitUsed'
+        X-RateLimit-Reset:
+          $ref: '#/components/headers/XRateLimitReset'
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ServiceUnavailableError'
+          examples:
+            statement_timeout:
+              summary: Statement timeout
+              value:
+                error: Query timed out — this dataset is under load or being maintained. Retry shortly.
+                error_kind: statement_timeout
+                retry_after_seconds: 10
+                _rid: eyJ1IjoiZXhhbXBsZSIsInQiOjE3OTEwMDAwMDAwMDAsImgiOiIwMDAwMDAwMCJ9
+            auth_backend:
+              summary: API-key lookup unavailable
+              value:
+                error: Authentication temporarily unavailable — please retry.
+                code: auth_backend_unavailable
+                error_kind: auth_backend
+                retryable: true
+                retry_after_seconds: 5
+    TierForbidden:
+      description: 'Forbidden. One of: the key''s tier is below this endpoint''s or parameter''s gate (`tier_required` with an `upgrade` block); the public demo key used outside its allow-list (`demo_key_endpoint_not_allowed`); an invalid or revoked key; an origin-restricted key called from a disallowed origin (`code` `origin_not_allowed` / `origin_required`). `X-RateLimit-*` headers are present only on `tier_required`.'
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        X-RateLimit-Limit:
+          $ref: '#/components/headers/XRateLimitLimit'
+        X-RateLimit-Remaining:
+          $ref: '#/components/headers/XRateLimitRemaining'
+        X-RateLimit-Used:
+          $ref: '#/components/headers/XRateLimitUsed'
+        X-RateLimit-Reset:
+          $ref: '#/components/headers/XRateLimitReset'
+      content:
+        application/json:
+          schema:
+            anyOf:
+            - $ref: '#/components/schemas/TierRequiredError'
+            - $ref: '#/components/schemas/DemoKeyNotAllowedError'
+            - $ref: '#/components/schemas/Error'
+          examples:
+            tier_required:
+              summary: Tier below the gate
+              value:
+                error: tier_required
+                message: This endpoint requires ULTRA tier — you're on PRO.
+                feature: This endpoint
+                your_tier: PRO
+                required_tier: ULTRA
+                upgrade:
+                  tier: ULTRA
+                  price_eur_per_month: 131
+                  price_usdc_per_month: 149
+                  daily_limit: 100000
+                  burst_limit: 600
+                  pitch: …
+                  url: https://madeonsol.com/pricing
+                  upgrade_url: https://madeonsol.com/checkout?tier=ULTRA
+                support: 'Priority support: info@madeonsol.com'
+                _rid: eyJ1IjoiZXhhbXBsZSIsInQiOjE3OTEwMDAwMDAwMDAsImgiOiIwMDAwMDAwMCJ9
+            demo_key:
+              summary: Demo key outside its allow-list
+              value:
+                error: demo_key_endpoint_not_allowed
+                message: The public demo key works on /kol/feed, /deployer-hunter/alerts, and /alpha/leaderboard only. This endpoint requires the PRO plan or higher; a free API key will not unlock it. See https://madeonsol.com/pricing.
+                endpoint_tier: PRO
+                allowed_endpoints:
+                - /api/v1/kol/feed
+                - /api/v1/deployer-hunter/alerts
+                - /api/v1/alpha/leaderboard
+                signup_url: https://madeonsol.com/developer
+                upgrade_url: https://madeonsol.com/checkout?tier=PRO
+            revoked_key:
+              summary: Invalid or revoked key
+              value:
+                error: Invalid or revoked API key
+    InternalError:
+      description: Unexpected server error from the route (`Internal server error`, with `_rid`). Safe to retry with backoff. A failed API-key lookup is a 503 `auth_backend_unavailable`, never a 500.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        X-RateLimit-Limit:
+          $ref: '#/components/headers/XRateLimitLimit'
+        X-RateLimit-Remaining:
+          $ref: '#/components/headers/XRateLimitRemaining'
+        X-RateLimit-Used:
+          $ref: '#/components/headers/XRateLimitUsed'
+        X-RateLimit-Reset:
+          $ref: '#/components/headers/XRateLimitReset'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            route:
+              summary: Route error
+              value:
+                error: Internal server error
+                _rid: eyJ1IjoiZXhhbXBsZSIsInQiOjE3OTEwMDAwMDAwMDAsImgiOiIwMDAwMDAwMCJ9
+    RateLimited:
+      description: Too many requests. Every 429 carries `Retry-After`. A quota 429 (`rate_limit_exceeded`, with `X-RateLimit-*`), a heavy-query concurrency 429 (`error_kind` `concurrency`/`capacity`), or the per-IP authentication-failure block (30 failed auths/min; plain `error` + `retry_after_seconds`, no `X-RateLimit-*`).
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        X-RateLimit-Limit:
+          $ref: '#/components/headers/XRateLimitLimit'
+        X-RateLimit-Remaining:
+          $ref: '#/components/headers/XRateLimitRemaining'
+        X-RateLimit-Used:
+          $ref: '#/components/headers/XRateLimitUsed'
+        X-RateLimit-Reset:
+          $ref: '#/components/headers/XRateLimitReset'
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/json:
+          schema:
+            anyOf:
+            - $ref: '#/components/schemas/RateLimitError'
+            - $ref: '#/components/schemas/ConcurrencyLimitError'
+            - $ref: '#/components/schemas/Error'
+          examples:
+            daily:
+              summary: Daily quota exhausted
+              value:
+                error: rate_limit_exceeded
+                error_kind: daily
+                message: Daily rate limit exceeded — 200/day for BASIC tier. Resets at midnight UTC.
+                tier: BASIC
+                limit: 200
+                resets_at: '2026-10-05T00:00:00.000Z'
+                upgrade:
+                  tier: PRO
+                  price_eur_per_month: 43
+                  price_usdc_per_month: 49
+                  daily_limit: 10000
+                  burst_limit: 300
+                  pitch: …
+                  url: https://madeonsol.com/pricing
+                  upgrade_url: https://madeonsol.com/checkout?tier=PRO
+                datasets:
+                  pitch: …
+                  url: https://madeonsol.com/datasets
+            concurrency:
+              summary: Too many heavy queries in flight
+              value:
+                error: Too many concurrent heavy queries. Up to 8 of these endpoints may be in flight at once per key — retry in a moment, or lower your request concurrency.
+                error_kind: concurrency
+                retry_after_seconds: 2
+                max_concurrent: 8
+                _rid: eyJ1IjoiZXhhbXBsZSIsInQiOjE3OTEwMDAwMDAwMDAsImgiOiIwMDAwMDAwMCJ9
+            auth_failures:
+              summary: Per-IP authentication-failure block
+              value:
+                error: Too many authentication failures from this IP. Retry in 60s.
+                retry_after_seconds: 42
+    AuthBackendUnavailable:
+      description: 'The API-key or subscription lookup could not be answered (authentication stage). Retryable and not your fault: it is never counted as a failed authentication. Honour `Retry-After`; no `X-RateLimit-*`, no `_rid`.'
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ServiceUnavailableError'
+          examples:
+            auth_backend:
+              summary: API-key lookup unavailable
+              value:
+                error: Authentication temporarily unavailable — please retry.
+                code: auth_backend_unavailable
+                error_kind: auth_backend
+                retryable: true
+                retry_after_seconds: 5
+    Unauthorized:
+      description: 'Missing or invalid API key, or an expired free-tier key. Authentication-stage error: no `X-RateLimit-*` headers, no `_rid`.'
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            missing_key:
+              summary: No Bearer key
+              value:
+                error: 'Missing authentication — use API key (Authorization: Bearer msk_...)'
+                hint: Get a free API key — 200 calls/day, no payment
+                signup_url: https://madeonsol.com/developer
+                docs_url: https://madeonsol.com/api-docs
+            bad_format:
+              summary: Malformed key
+              value:
+                error: Invalid API key format
+                hint: Get a free API key — 200 calls/day, no payment
+                signup_url: https://madeonsol.com/developer
+                docs_url: https://madeonsol.com/api-docs
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: msk_...
+      description: Get a free API key at https://madeonsol.com/developer
+x-madeonsol-tiers:
+- tier: FREE
+  plan: BASIC
+  name: Free
+  price_eur_monthly: 0
+  price_eur_annual: 0
+  price_usd_monthly: 0
+  daily_limit: 200
+  burst_limit: 60
+  url: https://madeonsol.com/developer
+- tier: PRO
+  plan: PRO
+  name: Pro
+  price_eur_monthly: 43
+  price_eur_annual: 430
+  price_usd_monthly: 49
+  daily_limit: 10000
+  burst_limit: 300
+  url: https://madeonsol.com/checkout?tier=PRO
+- tier: ULTRA
+  plan: ULTRA
+  name: Ultra
+  price_eur_monthly: 131
+  price_eur_annual: 1310
+  price_usd_monthly: 149
+  daily_limit: 100000
+  burst_limit: 600
+  url: https://madeonsol.com/checkout?tier=ULTRA
+- tier: BUSINESS
+  plan: BUSINESS
+  name: Business
+  price_eur_monthly: 400
+  price_eur_annual: 4000
+  price_usd_monthly: 456
+  daily_limit: 500000
+  burst_limit: 3000
+  url: https://madeonsol.com/checkout?tier=BUSINESS
+- tier: ENTERPRISE
+  plan: ENTERPRISE
+  name: Enterprise
+  price_eur_monthly: null
+  price_eur_annual: null
+  price_usd_monthly: null
+  daily_limit: null
+  burst_limit: null
+  url: https://madeonsol.com/pricing#enterprise

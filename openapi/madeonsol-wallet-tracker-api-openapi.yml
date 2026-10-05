@@ -1,0 +1,1166 @@
+openapi: 3.2.0
+info:
+  title: MadeOnSol Wallet Tracker API
+  version: 1.20.0
+  description: Real-time Solana & Robinhood Chain trading intelligence — KOL wallet trades, deployer reputation, token buyer-quality scoring, wallet tracking, and copy-trade signals across both chains (Robinhood Chain paths under `/rhc/*`).
+  contact:
+    name: MadeOnSol
+    url: https://madeonsol.com/contact
+  license:
+    name: Proprietary
+    url: https://madeonsol.com/terms
+servers:
+- url: https://madeonsol.com/api/v1
+  description: Production
+security:
+- BearerAuth: []
+tags:
+- name: Wallet Tracker
+  description: Track any Solana wallet — aggregate stats and recent trades.
+paths:
+  /wallet-tracker/summary:
+    get:
+      tags:
+      - Wallet Tracker
+      summary: Your tracked-wallet summary
+      description: 'Per-wallet activity stats for every Solana wallet you''ve added to your tracker. Capacity: PRO 50, ULTRA 100, BUSINESS 500 wallets. BASIC has no access to the wallet tracker (403).'
+      parameters:
+      - name: wallet
+        in: query
+        schema:
+          type: string
+        description: Restrict to one tracked wallet (base58).
+      - name: period
+        in: query
+        schema:
+          type: string
+          enum:
+          - 24h
+          - 7d
+          - 30d
+          default: 7d
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WalletTrackerSummary'
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: PRO
+      x-badges:
+      - name: PRO
+        position: after
+        color: '#1d4ed8'
+      operationId: getWalletTrackerSummary
+      x-operation-id-source: derived
+  /wallet-tracker/trades:
+    get:
+      tags:
+      - Wallet Tracker
+      summary: Watchlist wallet trade/transfer events
+      description: Swap and transfer events for wallets on your tracker watchlist. PRO/ULTRA only.
+      parameters:
+      - name: wallet
+        in: query
+        schema:
+          type: string
+        description: Filter to one watched wallet (base58)
+      - name: action
+        in: query
+        schema:
+          type: string
+          enum:
+          - buy
+          - sell
+        description: Swaps only; transfers have action null
+      - name: event_type
+        in: query
+        schema:
+          type: string
+          enum:
+          - swap
+          - transfer
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 50
+      - name: order
+        in: query
+        schema:
+          type: string
+          enum:
+          - slot
+          - block_time
+        description: slot = on-chain order, block_time = ingest order. Default slot, or block_time when `before` is sent; an explicit value always wins
+      - name: before_slot
+        in: query
+        schema:
+          type: integer
+        description: 'Cursor for order=slot: pass next_cursor_slot'
+      - name: before
+        in: query
+        schema:
+          type: integer
+        description: Legacy block_time cursor (pins order=block_time unless order is set)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        wallet_address:
+                          type: string
+                        label:
+                          type: string
+                          nullable: true
+                        event_type:
+                          type: string
+                          enum:
+                          - swap
+                          - transfer
+                        action:
+                          type: string
+                          enum:
+                          - buy
+                          - sell
+                          nullable: true
+                        token_mint:
+                          type: string
+                          nullable: true
+                        token_symbol:
+                          type: string
+                          nullable: true
+                        token_name:
+                          type: string
+                          nullable: true
+                        sol_amount:
+                          type: number
+                          nullable: true
+                        token_amount:
+                          type: number
+                          nullable: true
+                        counterparty:
+                          type: string
+                          description: 'Transfers only: the other wallet when it could be matched. The key is omitted on swaps and on unmatched transfers'
+                        tx_signature:
+                          type: string
+                        block_time:
+                          type: integer
+                          description: Epoch seconds, ingest clock (when we saw it), not chain time
+                        slot:
+                          type: integer
+                          nullable: true
+                          description: On-chain slot; null on rows written before 2026-09-20
+                        replayed:
+                          type: boolean
+                          description: true when the row was recovered by a gap replay rather than delivered live
+                        ingested_at:
+                          type: string
+                          format: date-time
+                          description: ISO form of block_time
+                        timestamp:
+                          type: string
+                          format: date-time
+                          description: Alias of ingested_at, kept for compatibility
+                  count:
+                    type: integer
+                  ordered_by:
+                    type: string
+                    enum:
+                    - slot
+                    - block_time
+                    description: Which ordering produced this page
+                  next_cursor:
+                    type: integer
+                    nullable: true
+                    description: Pass as ?before= for the next page; null when this page was short of the limit
+                  next_cursor_slot:
+                    type: integer
+                    nullable: true
+                    description: Pass as ?before_slot= for the next page (order=slot); null when the page was short or its last row has no slot
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: PRO
+      x-badges:
+      - name: PRO
+        position: after
+        color: '#1d4ed8'
+      operationId: getWalletTrackerTrades
+      x-operation-id-source: derived
+  /wallet-tracker/watchlist:
+    get:
+      tags:
+      - Wallet Tracker
+      summary: List your tracked wallets
+      description: List the wallets on your tracker watchlist — each with its base58 address, optional label, and added-at time. PRO/ULTRA only.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  wallets:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        wallet_address:
+                          type: string
+                        label:
+                          type: string
+                          nullable: true
+                        added_at:
+                          type: string
+                          format: date-time
+                  count:
+                    type: integer
+                  limit:
+                    type: integer
+                    description: Wallet cap for the caller's tier
+                  remaining:
+                    type: integer
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: PRO
+      x-badges:
+      - name: PRO
+        position: after
+        color: '#1d4ed8'
+      operationId: getWalletTrackerWatchlist
+      x-operation-id-source: derived
+    post:
+      tags:
+      - Wallet Tracker
+      summary: Add a wallet to your watchlist
+      description: Add a Solana wallet to your tracker watchlist (up to your tier's wallet cap). PRO/ULTRA only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                wallet_address:
+                  type: string
+                  description: Solana wallet address (base58)
+                label:
+                  type: string
+                  maxLength: 64
+                  description: Optional label
+              required:
+              - wallet_address
+      responses:
+        '200':
+          description: Added
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  wallet:
+                    type: object
+                    properties:
+                      wallet_address:
+                        type: string
+                      label:
+                        type: string
+                        nullable: true
+                      added_at:
+                        type: string
+                        format: date-time
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '409':
+          description: Watchlist cap reached
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: PRO
+      x-badges:
+      - name: PRO
+        position: after
+        color: '#1d4ed8'
+      operationId: postWalletTrackerWatchlist
+      x-operation-id-source: derived
+  /wallet-tracker/watchlist/{address}:
+    parameters:
+    - name: address
+      in: path
+      required: true
+      schema:
+        type: string
+        example: 2FxiPRPLYX3H84FZkdRiUHDgDm4U5u98etbL4yvZ3qRq
+      description: Watched wallet address (base58)
+    patch:
+      tags:
+      - Wallet Tracker
+      summary: Rename a watched wallet
+      description: Rename a wallet on your watchlist, addressed by the `address` path param (base58). Send `{ label }` (≤64 chars) in the JSON body. 404 if the wallet isn't on your watchlist.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                label:
+                  type: string
+                  maxLength: 64
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  wallet:
+                    type: object
+                    properties:
+                      wallet_address:
+                        type: string
+                      label:
+                        type: string
+                        nullable: true
+                      added_at:
+                        type: string
+                        format: date-time
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '404':
+          description: Not found
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: PRO
+      x-badges:
+      - name: PRO
+        position: after
+        color: '#1d4ed8'
+      operationId: patchWalletTrackerWatchlistByAddress
+      x-operation-id-source: derived
+    delete:
+      tags:
+      - Wallet Tracker
+      summary: Remove a wallet from your watchlist
+      description: Remove a wallet from your tracker watchlist, addressed by the `address` path param (base58). 404 if the wallet isn't on your watchlist.
+      responses:
+        '200':
+          description: Removed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  removed:
+                    type: string
+                    description: The wallet address that was removed
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '404':
+          description: Not found
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: PRO
+      x-badges:
+      - name: PRO
+        position: after
+        color: '#1d4ed8'
+      operationId: deleteWalletTrackerWatchlistByAddress
+      x-operation-id-source: derived
+components:
+  headers:
+    XRateLimitReset:
+      description: When the window resets, as a Unix epoch in SECONDS (next 00:00 UTC for the daily quota; about 60 s ahead for a per-minute bucket).
+      schema:
+        type: integer
+      example: 1791158400
+    XRateLimitRemaining:
+      description: Calls left in that window. `0` on a quota 429.
+      schema:
+        type: integer
+        minimum: 0
+      example: 9412
+    XDataDelay:
+      description: 'Free-tier only: the feed in this body is delayed by this many seconds (same value as the body''s `delay_seconds`). Absent on real-time responses.'
+      schema:
+        type: integer
+        minimum: 1
+      example: 300
+    XRateLimitLimit:
+      description: 'Size of the rate-limit window this call was counted against: the daily quota for your tier on data endpoints, the per-minute bucket on `/stream/token` (10) and `/stream/sessions` (30), the hourly allowance for the public demo key. Sent once the key has been authenticated and rate-limited, so it is absent on authentication-stage errors.'
+      schema:
+        type: integer
+        minimum: 0
+      example: 10000
+    XMadeOnSolQuotaWarning:
+      description: 'Free-tier only, past about 70 % of the daily quota: a human-readable usage line with an upgrade link.'
+      schema:
+        type: string
+      example: '150/200 used - upgrade for 50x higher limits: https://madeonsol.com/checkout?tier=PRO'
+    XRequestId:
+      description: Unique id of this response. On responses built after authentication it is also the `request_id` of the audit-log row for the call, so quote it in a support request. Present on every response of the keyed API.
+      required: true
+      schema:
+        type: string
+        format: uuid
+      example: 3f6c1d2e-8a4b-4f7e-9c21-5b0d7e6a9f13
+    XRateLimitUsed:
+      description: Calls used in that window (`limit − remaining`).
+      schema:
+        type: integer
+        minimum: 0
+      example: 588
+    RetryAfter:
+      description: Seconds to wait before retrying (RFC 9110 delay-seconds, at least 1). Sent on every 429 (quota, concurrency, authentication-failure) and every 503; when the body carries `retry_after_seconds` it is the same value.
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+      example: 10
+  schemas:
+    DemoKeyNotAllowedError:
+      type: object
+      description: 403 for the public demo key (`msk_demo_…`) outside its three-endpoint allow-list. `endpoint_tier` is the endpoint's real minimum plan (null when unknown).
+      required:
+      - error
+      - message
+      - allowed_endpoints
+      properties:
+        error:
+          type: string
+          enum:
+          - demo_key_endpoint_not_allowed
+        message:
+          type: string
+        endpoint_tier:
+          type: string
+          nullable: true
+          enum:
+          - FREE
+          - PRO
+          - ULTRA
+          - BUSINESS
+          - ENTERPRISE
+          - null
+        allowed_endpoints:
+          type: array
+          items:
+            type: string
+        signup_url:
+          type: string
+          format: uri
+        upgrade_url:
+          type: string
+          format: uri
+          description: Only when the endpoint's tier can be bought at /checkout.
+    ConcurrencyLimitError:
+      type: object
+      description: '429 from the heavy-query limiter: too many heavy requests in flight for this key (`concurrency`) or for the whole server (`capacity`). Clears as soon as in-flight requests finish.'
+      required:
+      - error
+      - error_kind
+      - retry_after_seconds
+      properties:
+        error:
+          type: string
+        error_kind:
+          type: string
+          enum:
+          - concurrency
+          - capacity
+        retry_after_seconds:
+          type: number
+        max_concurrent:
+          type: integer
+        support:
+          type: string
+        _rid:
+          type: string
+    TierRequiredError:
+      type: object
+      description: 403 when the key's tier is below the endpoint's (or a parameter's) gate. `required_tier` matches the operation's `x-madeonsol-tier` or `x-madeonsol-feature-tiers`. ENTERPRISE gates return `contact` instead of `upgrade`.
+      required:
+      - error
+      - message
+      - your_tier
+      - required_tier
+      properties:
+        error:
+          type: string
+          enum:
+          - tier_required
+        message:
+          type: string
+        feature:
+          type: string
+        your_tier:
+          type: string
+          enum:
+          - BASIC
+          - PRO
+          - ULTRA
+          - BUSINESS
+          - ENTERPRISE
+        required_tier:
+          type: string
+          enum:
+          - PRO
+          - ULTRA
+          - BUSINESS
+          - ENTERPRISE
+        upgrade:
+          type: object
+          description: The plan that lifts this limit, with price and a checkout link.
+          properties:
+            tier:
+              type: string
+              enum:
+              - PRO
+              - ULTRA
+              - BUSINESS
+              - ENTERPRISE
+            price_eur_per_month:
+              type: number
+            price_usdc_per_month:
+              type: number
+            daily_limit:
+              type: integer
+            burst_limit:
+              type: integer
+            pitch:
+              type: string
+            url:
+              type: string
+            upgrade_url:
+              type: string
+              format: uri
+            reactivate:
+              type: boolean
+              description: Present (true) when the key's paid subscription has just lapsed and `tier` is the plan it held.
+            prior_tier:
+              type: string
+              enum:
+              - PRO
+              - ULTRA
+              - BUSINESS
+        contact:
+          type: object
+          properties:
+            url:
+              type: string
+            contact_url:
+              type: string
+            pitch:
+              type: string
+        support:
+          type: string
+        _rid:
+          type: string
+    ServiceUnavailableError:
+      type: object
+      description: '503: a temporary capacity or maintenance condition (e.g. a Postgres statement timeout during a partition move, or the API-key lookup itself being unavailable). Retry after `Retry-After` seconds.'
+      required:
+      - error
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+          description: Machine-readable code where one exists, e.g. `auth_backend_unavailable`.
+        error_kind:
+          type: string
+          description: e.g. `statement_timeout`, `auth_backend`
+        retry_after_seconds:
+          type: number
+        retryable:
+          type: boolean
+        support:
+          type: string
+        _rid:
+          type: string
+    RateLimitError:
+      type: object
+      description: '429 when a quota is exhausted: the daily quota, the per-minute burst, or a free-tier network/key-rotation cap. `datasets` is added on `daily` only.'
+      required:
+      - error
+      - error_kind
+      - message
+      - tier
+      - limit
+      - resets_at
+      properties:
+        error:
+          type: string
+          enum:
+          - rate_limit_exceeded
+        error_kind:
+          type: string
+          enum:
+          - daily
+          - burst
+          - ip_cap
+          - ip_rotation
+        message:
+          type: string
+        tier:
+          type: string
+          enum:
+          - BASIC
+          - PRO
+          - ULTRA
+          - BUSINESS
+          - ENTERPRISE
+        limit:
+          type: integer
+        resets_at:
+          type: string
+          format: date-time
+        upgrade:
+          type: object
+          description: The plan that lifts this limit, with price and a checkout link.
+          properties:
+            tier:
+              type: string
+              enum:
+              - PRO
+              - ULTRA
+              - BUSINESS
+              - ENTERPRISE
+            price_eur_per_month:
+              type: number
+            price_usdc_per_month:
+              type: number
+            daily_limit:
+              type: integer
+            burst_limit:
+              type: integer
+            pitch:
+              type: string
+            url:
+              type: string
+            upgrade_url:
+              type: string
+              format: uri
+            reactivate:
+              type: boolean
+              description: Present (true) when the key's paid subscription has just lapsed and `tier` is the plan it held.
+            prior_tier:
+              type: string
+              enum:
+              - PRO
+              - ULTRA
+              - BUSINESS
+        datasets:
+          type: object
+          properties:
+            pitch:
+              type: string
+            url:
+              type: string
+              format: uri
+    WalletTrackerSummary:
+      type: object
+      description: 'Per-wallet activity for your Solana tracked wallets over `period` (newest-added first). An empty tracker returns `{ wallets: [], period }` without `interval`.'
+      properties:
+        wallets:
+          type: array
+          items:
+            type: object
+            properties:
+              wallet_address:
+                type: string
+              label:
+                type: string
+                nullable: true
+              added_at:
+                type: string
+                format: date-time
+              stats:
+                type: object
+                properties:
+                  swap_count:
+                    type: integer
+                  transfer_count:
+                    type: integer
+                  buys:
+                    type: integer
+                  sells:
+                    type: integer
+                  sol_bought:
+                    type: number
+                  sol_sold:
+                    type: number
+                  last_event_at:
+                    type: string
+                    format: date-time
+                    nullable: true
+        period:
+          type: string
+          enum:
+          - 24h
+          - 7d
+          - 30d
+        interval:
+          type: string
+          description: Postgres interval for the period, e.g. "7 days".
+    Error:
+      type: object
+      description: Generic error envelope. `error` is always present (SDKs match on it). Errors returned after authentication also carry `_rid` and, on paid tiers, `support`; authentication-stage errors (missing/invalid key, origin) carry neither.
+      properties:
+        error:
+          type: string
+          description: Error message or machine code (e.g. `tier_required`, `rate_limit_exceeded`). Never changed once shipped.
+        message:
+          type: string
+          description: Human-readable explanation, when `error` is a machine code.
+        code:
+          type: string
+          description: Machine-readable sub-code on some errors (e.g. `invalid_query`, `invalid_wallet`, `origin_not_allowed`).
+        error_kind:
+          type: string
+          description: Machine-readable category on some errors (e.g. `statement_timeout`, `concurrency`, `daily`).
+        detail:
+          type: string
+          description: Extra human-readable context.
+        hint:
+          type: string
+        retry_after_seconds:
+          type: number
+          description: When present on a 429/503, the same value is sent as the `Retry-After` header.
+        signup_url:
+          type: string
+          format: uri
+          description: 'On the missing-key / bad-format 401: where to get a free key.'
+        docs_url:
+          type: string
+          format: uri
+        support:
+          type: string
+          description: 'Paid tiers, errors after authentication: priority support contact.'
+        _rid:
+          type: string
+          description: Request ID — include when reporting issues
+      required:
+      - error
+  responses:
+    TierForbidden:
+      description: 'Forbidden. One of: the key''s tier is below this endpoint''s or parameter''s gate (`tier_required` with an `upgrade` block); the public demo key used outside its allow-list (`demo_key_endpoint_not_allowed`); an invalid or revoked key; an origin-restricted key called from a disallowed origin (`code` `origin_not_allowed` / `origin_required`). `X-RateLimit-*` headers are present only on `tier_required`.'
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        X-RateLimit-Limit:
+          $ref: '#/components/headers/XRateLimitLimit'
+        X-RateLimit-Remaining:
+          $ref: '#/components/headers/XRateLimitRemaining'
+        X-RateLimit-Used:
+          $ref: '#/components/headers/XRateLimitUsed'
+        X-RateLimit-Reset:
+          $ref: '#/components/headers/XRateLimitReset'
+      content:
+        application/json:
+          schema:
+            anyOf:
+            - $ref: '#/components/schemas/TierRequiredError'
+            - $ref: '#/components/schemas/DemoKeyNotAllowedError'
+            - $ref: '#/components/schemas/Error'
+          examples:
+            tier_required:
+              summary: Tier below the gate
+              value:
+                error: tier_required
+                message: This endpoint requires ULTRA tier — you're on PRO.
+                feature: This endpoint
+                your_tier: PRO
+                required_tier: ULTRA
+                upgrade:
+                  tier: ULTRA
+                  price_eur_per_month: 131
+                  price_usdc_per_month: 149
+                  daily_limit: 100000
+                  burst_limit: 600
+                  pitch: …
+                  url: https://madeonsol.com/pricing
+                  upgrade_url: https://madeonsol.com/checkout?tier=ULTRA
+                support: 'Priority support: info@madeonsol.com'
+                _rid: eyJ1IjoiZXhhbXBsZSIsInQiOjE3OTEwMDAwMDAwMDAsImgiOiIwMDAwMDAwMCJ9
+            demo_key:
+              summary: Demo key outside its allow-list
+              value:
+                error: demo_key_endpoint_not_allowed
+                message: The public demo key works on /kol/feed, /deployer-hunter/alerts, and /alpha/leaderboard only. This endpoint requires the PRO plan or higher; a free API key will not unlock it. See https://madeonsol.com/pricing.
+                endpoint_tier: PRO
+                allowed_endpoints:
+                - /api/v1/kol/feed
+                - /api/v1/deployer-hunter/alerts
+                - /api/v1/alpha/leaderboard
+                signup_url: https://madeonsol.com/developer
+                upgrade_url: https://madeonsol.com/checkout?tier=PRO
+            revoked_key:
+              summary: Invalid or revoked key
+              value:
+                error: Invalid or revoked API key
+    InternalError:
+      description: Unexpected server error from the route (`Internal server error`, with `_rid`). Safe to retry with backoff. A failed API-key lookup is a 503 `auth_backend_unavailable`, never a 500.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        X-RateLimit-Limit:
+          $ref: '#/components/headers/XRateLimitLimit'
+        X-RateLimit-Remaining:
+          $ref: '#/components/headers/XRateLimitRemaining'
+        X-RateLimit-Used:
+          $ref: '#/components/headers/XRateLimitUsed'
+        X-RateLimit-Reset:
+          $ref: '#/components/headers/XRateLimitReset'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            route:
+              summary: Route error
+              value:
+                error: Internal server error
+                _rid: eyJ1IjoiZXhhbXBsZSIsInQiOjE3OTEwMDAwMDAwMDAsImgiOiIwMDAwMDAwMCJ9
+    RateLimited:
+      description: Too many requests. Every 429 carries `Retry-After`. A quota 429 (`rate_limit_exceeded`, with `X-RateLimit-*`), a heavy-query concurrency 429 (`error_kind` `concurrency`/`capacity`), or the per-IP authentication-failure block (30 failed auths/min; plain `error` + `retry_after_seconds`, no `X-RateLimit-*`).
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        X-RateLimit-Limit:
+          $ref: '#/components/headers/XRateLimitLimit'
+        X-RateLimit-Remaining:
+          $ref: '#/components/headers/XRateLimitRemaining'
+        X-RateLimit-Used:
+          $ref: '#/components/headers/XRateLimitUsed'
+        X-RateLimit-Reset:
+          $ref: '#/components/headers/XRateLimitReset'
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/json:
+          schema:
+            anyOf:
+            - $ref: '#/components/schemas/RateLimitError'
+            - $ref: '#/components/schemas/ConcurrencyLimitError'
+            - $ref: '#/components/schemas/Error'
+          examples:
+            daily:
+              summary: Daily quota exhausted
+              value:
+                error: rate_limit_exceeded
+                error_kind: daily
+                message: Daily rate limit exceeded — 200/day for BASIC tier. Resets at midnight UTC.
+                tier: BASIC
+                limit: 200
+                resets_at: '2026-10-05T00:00:00.000Z'
+                upgrade:
+                  tier: PRO
+                  price_eur_per_month: 43
+                  price_usdc_per_month: 49
+                  daily_limit: 10000
+                  burst_limit: 300
+                  pitch: …
+                  url: https://madeonsol.com/pricing
+                  upgrade_url: https://madeonsol.com/checkout?tier=PRO
+                datasets:
+                  pitch: …
+                  url: https://madeonsol.com/datasets
+            concurrency:
+              summary: Too many heavy queries in flight
+              value:
+                error: Too many concurrent heavy queries. Up to 8 of these endpoints may be in flight at once per key — retry in a moment, or lower your request concurrency.
+                error_kind: concurrency
+                retry_after_seconds: 2
+                max_concurrent: 8
+                _rid: eyJ1IjoiZXhhbXBsZSIsInQiOjE3OTEwMDAwMDAwMDAsImgiOiIwMDAwMDAwMCJ9
+            auth_failures:
+              summary: Per-IP authentication-failure block
+              value:
+                error: Too many authentication failures from this IP. Retry in 60s.
+                retry_after_seconds: 42
+    AuthBackendUnavailable:
+      description: 'The API-key or subscription lookup could not be answered (authentication stage). Retryable and not your fault: it is never counted as a failed authentication. Honour `Retry-After`; no `X-RateLimit-*`, no `_rid`.'
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ServiceUnavailableError'
+          examples:
+            auth_backend:
+              summary: API-key lookup unavailable
+              value:
+                error: Authentication temporarily unavailable — please retry.
+                code: auth_backend_unavailable
+                error_kind: auth_backend
+                retryable: true
+                retry_after_seconds: 5
+    Unauthorized:
+      description: 'Missing or invalid API key, or an expired free-tier key. Authentication-stage error: no `X-RateLimit-*` headers, no `_rid`.'
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            missing_key:
+              summary: No Bearer key
+              value:
+                error: 'Missing authentication — use API key (Authorization: Bearer msk_...)'
+                hint: Get a free API key — 200 calls/day, no payment
+                signup_url: https://madeonsol.com/developer
+                docs_url: https://madeonsol.com/api-docs
+            bad_format:
+              summary: Malformed key
+              value:
+                error: Invalid API key format
+                hint: Get a free API key — 200 calls/day, no payment
+                signup_url: https://madeonsol.com/developer
+                docs_url: https://madeonsol.com/api-docs
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: msk_...
+      description: Get a free API key at https://madeonsol.com/developer
+x-madeonsol-tiers:
+- tier: FREE
+  plan: BASIC
+  name: Free
+  price_eur_monthly: 0
+  price_eur_annual: 0
+  price_usd_monthly: 0
+  daily_limit: 200
+  burst_limit: 60
+  url: https://madeonsol.com/developer
+- tier: PRO
+  plan: PRO
+  name: Pro
+  price_eur_monthly: 43
+  price_eur_annual: 430
+  price_usd_monthly: 49
+  daily_limit: 10000
+  burst_limit: 300
+  url: https://madeonsol.com/checkout?tier=PRO
+- tier: ULTRA
+  plan: ULTRA
+  name: Ultra
+  price_eur_monthly: 131
+  price_eur_annual: 1310
+  price_usd_monthly: 149
+  daily_limit: 100000
+  burst_limit: 600
+  url: https://madeonsol.com/checkout?tier=ULTRA
+- tier: BUSINESS
+  plan: BUSINESS
+  name: Business
+  price_eur_monthly: 400
+  price_eur_annual: 4000
+  price_usd_monthly: 456
+  daily_limit: 500000
+  burst_limit: 3000
+  url: https://madeonsol.com/checkout?tier=BUSINESS
+- tier: ENTERPRISE
+  plan: ENTERPRISE
+  name: Enterprise
+  price_eur_monthly: null
+  price_eur_annual: null
+  price_usd_monthly: null
+  daily_limit: null
+  burst_limit: null
+  url: https://madeonsol.com/pricing#enterprise

@@ -1,0 +1,508 @@
+openapi: 3.2.0
+info:
+  title: MadeOnSol Status API
+  version: 1.20.0
+  description: Real-time Solana & Robinhood Chain trading intelligence — KOL wallet trades, deployer reputation, token buyer-quality scoring, wallet tracking, and copy-trade signals across both chains (Robinhood Chain paths under `/rhc/*`).
+  contact:
+    name: MadeOnSol
+    url: https://madeonsol.com/contact
+  license:
+    name: Proprietary
+    url: https://madeonsol.com/terms
+servers:
+- url: https://madeonsol.com/api/v1
+  description: Production
+security:
+- BearerAuth: []
+tags:
+- name: Status
+  description: Public service health + data-quality status (no auth).
+paths:
+  /status:
+    get:
+      tags:
+      - Status
+      summary: Public service + data-quality status
+      description: 'Live health of the 7 core services (KOL tracker, deployer listener, API server, database, WebSocket, plus Robinhood Chain node sync and trade-ingest freshness), 24h/7d uptime, and data-quality measures (accuracy, correctness, drift, serve-time). Per-service `status` is one of `healthy` | `degraded` | `down` | `stale` | `unknown` — `stale` means the monitor itself has not reported within 3x its 5-minute cadence (the last row''s claim is unverifiable; `reported_status` carries what it said), `unknown` means no check row exists at all. Top-level `status` is computed over ALL 7 core services: `incident` if any is down, `degraded` if any is degraded/stale/unknown, `operational` only when every service has a fresh healthy check. `slo_target_pct` is an operating TARGET, not a measured result or a contractual guarantee. Public — no auth required.'
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum:
+                    - operational
+                    - degraded
+                    - incident
+                  services:
+                    type: object
+                    description: 'Keyed by service name: kol_tracker, deployer_listener, nextjs_app, supabase_db, websocket, rhc_node_sync, rhc_trades_freshness'
+                    additionalProperties:
+                      type: object
+                      properties:
+                        status:
+                          type: string
+                          enum:
+                          - healthy
+                          - degraded
+                          - down
+                          - stale
+                          - unknown
+                        last_check:
+                          type: string
+                          format: date-time
+                          nullable: true
+                        reported_status:
+                          type: string
+                          nullable: true
+                          description: Present only when status is stale — what the last (unverifiable) check row claimed
+                        response_ms:
+                          type: integer
+                          nullable: true
+                        last_trade_age_s:
+                          type: number
+                          nullable: true
+                        connections:
+                          type: integer
+                          nullable: true
+                  uptime:
+                    type: object
+                    properties:
+                      last_24h:
+                        type: number
+                        nullable: true
+                        description: Percent healthy checks
+                      last_7d:
+                        type: number
+                        nullable: true
+                  data_quality:
+                    type: object
+                    properties:
+                      slo_target_pct:
+                        type: number
+                      window:
+                        type: string
+                      secondary_window:
+                        type: string
+                      accuracy:
+                        type: object
+                        properties:
+                          pct:
+                            type: number
+                            nullable: true
+                          samples:
+                            type: integer
+                          week:
+                            type: object
+                            properties:
+                              pct:
+                                type: number
+                                nullable: true
+                              samples:
+                                type: integer
+                      correctness:
+                        type: object
+                        properties:
+                          pct:
+                            type: number
+                            nullable: true
+                          samples:
+                            type: integer
+                          week:
+                            type: object
+                            properties:
+                              pct:
+                                type: number
+                                nullable: true
+                              samples:
+                                type: integer
+                      drift:
+                        type: object
+                        properties:
+                          pct:
+                            type: number
+                            nullable: true
+                          samples:
+                            type: integer
+                          week:
+                            type: object
+                            properties:
+                              pct:
+                                type: number
+                                nullable: true
+                              samples:
+                                type: integer
+                      serve_time:
+                        type: object
+                        properties:
+                          pct:
+                            type: number
+                            nullable: true
+                          samples:
+                            type: integer
+                          week:
+                            type: object
+                            properties:
+                              pct:
+                                type: number
+                                nullable: true
+                              samples:
+                                type: integer
+                  verification:
+                    type: object
+                    description: Latest run of each automated verification tier
+                    properties:
+                      fast:
+                        type: object
+                        nullable: true
+                        properties:
+                          cases:
+                            type: integer
+                            nullable: true
+                          failing:
+                            type: integer
+                            nullable: true
+                          cadence:
+                            type: string
+                          last_run:
+                            type: string
+                            format: date-time
+                      full:
+                        type: object
+                        nullable: true
+                        properties:
+                          cases:
+                            type: integer
+                            nullable: true
+                          failing:
+                            type: integer
+                            nullable: true
+                          cadence:
+                            type: string
+                          last_run:
+                            type: string
+                            format: date-time
+                      nightly:
+                        type: object
+                        nullable: true
+                        properties:
+                          cases:
+                            type: integer
+                            nullable: true
+                          failing:
+                            type: integer
+                            nullable: true
+                          cadence:
+                            type: string
+                          last_run:
+                            type: string
+                            format: date-time
+                  checked_at:
+                    type: string
+                    format: date-time
+        '429':
+          $ref: '#/components/responses/RateLimited'
+      x-madeonsol-tier: FREE
+      x-badges:
+      - name: FREE
+        position: after
+        color: '#64748b'
+      operationId: getStatus
+      x-operation-id-source: derived
+components:
+  headers:
+    XRateLimitReset:
+      description: When the window resets, as a Unix epoch in SECONDS (next 00:00 UTC for the daily quota; about 60 s ahead for a per-minute bucket).
+      schema:
+        type: integer
+      example: 1791158400
+    XRateLimitRemaining:
+      description: Calls left in that window. `0` on a quota 429.
+      schema:
+        type: integer
+        minimum: 0
+      example: 9412
+    XRateLimitUsed:
+      description: Calls used in that window (`limit − remaining`).
+      schema:
+        type: integer
+        minimum: 0
+      example: 588
+    RetryAfter:
+      description: Seconds to wait before retrying (RFC 9110 delay-seconds, at least 1). Sent on every 429 (quota, concurrency, authentication-failure) and every 503; when the body carries `retry_after_seconds` it is the same value.
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+      example: 10
+    XRateLimitLimit:
+      description: 'Size of the rate-limit window this call was counted against: the daily quota for your tier on data endpoints, the per-minute bucket on `/stream/token` (10) and `/stream/sessions` (30), the hourly allowance for the public demo key. Sent once the key has been authenticated and rate-limited, so it is absent on authentication-stage errors.'
+      schema:
+        type: integer
+        minimum: 0
+      example: 10000
+    XRequestId:
+      description: Unique id of this response. On responses built after authentication it is also the `request_id` of the audit-log row for the call, so quote it in a support request. Present on every response of the keyed API.
+      required: true
+      schema:
+        type: string
+        format: uuid
+      example: 3f6c1d2e-8a4b-4f7e-9c21-5b0d7e6a9f13
+  schemas:
+    RateLimitError:
+      type: object
+      description: '429 when a quota is exhausted: the daily quota, the per-minute burst, or a free-tier network/key-rotation cap. `datasets` is added on `daily` only.'
+      required:
+      - error
+      - error_kind
+      - message
+      - tier
+      - limit
+      - resets_at
+      properties:
+        error:
+          type: string
+          enum:
+          - rate_limit_exceeded
+        error_kind:
+          type: string
+          enum:
+          - daily
+          - burst
+          - ip_cap
+          - ip_rotation
+        message:
+          type: string
+        tier:
+          type: string
+          enum:
+          - BASIC
+          - PRO
+          - ULTRA
+          - BUSINESS
+          - ENTERPRISE
+        limit:
+          type: integer
+        resets_at:
+          type: string
+          format: date-time
+        upgrade:
+          type: object
+          description: The plan that lifts this limit, with price and a checkout link.
+          properties:
+            tier:
+              type: string
+              enum:
+              - PRO
+              - ULTRA
+              - BUSINESS
+              - ENTERPRISE
+            price_eur_per_month:
+              type: number
+            price_usdc_per_month:
+              type: number
+            daily_limit:
+              type: integer
+            burst_limit:
+              type: integer
+            pitch:
+              type: string
+            url:
+              type: string
+            upgrade_url:
+              type: string
+              format: uri
+            reactivate:
+              type: boolean
+              description: Present (true) when the key's paid subscription has just lapsed and `tier` is the plan it held.
+            prior_tier:
+              type: string
+              enum:
+              - PRO
+              - ULTRA
+              - BUSINESS
+        datasets:
+          type: object
+          properties:
+            pitch:
+              type: string
+            url:
+              type: string
+              format: uri
+    ConcurrencyLimitError:
+      type: object
+      description: '429 from the heavy-query limiter: too many heavy requests in flight for this key (`concurrency`) or for the whole server (`capacity`). Clears as soon as in-flight requests finish.'
+      required:
+      - error
+      - error_kind
+      - retry_after_seconds
+      properties:
+        error:
+          type: string
+        error_kind:
+          type: string
+          enum:
+          - concurrency
+          - capacity
+        retry_after_seconds:
+          type: number
+        max_concurrent:
+          type: integer
+        support:
+          type: string
+        _rid:
+          type: string
+    Error:
+      type: object
+      description: Generic error envelope. `error` is always present (SDKs match on it). Errors returned after authentication also carry `_rid` and, on paid tiers, `support`; authentication-stage errors (missing/invalid key, origin) carry neither.
+      properties:
+        error:
+          type: string
+          description: Error message or machine code (e.g. `tier_required`, `rate_limit_exceeded`). Never changed once shipped.
+        message:
+          type: string
+          description: Human-readable explanation, when `error` is a machine code.
+        code:
+          type: string
+          description: Machine-readable sub-code on some errors (e.g. `invalid_query`, `invalid_wallet`, `origin_not_allowed`).
+        error_kind:
+          type: string
+          description: Machine-readable category on some errors (e.g. `statement_timeout`, `concurrency`, `daily`).
+        detail:
+          type: string
+          description: Extra human-readable context.
+        hint:
+          type: string
+        retry_after_seconds:
+          type: number
+          description: When present on a 429/503, the same value is sent as the `Retry-After` header.
+        signup_url:
+          type: string
+          format: uri
+          description: 'On the missing-key / bad-format 401: where to get a free key.'
+        docs_url:
+          type: string
+          format: uri
+        support:
+          type: string
+          description: 'Paid tiers, errors after authentication: priority support contact.'
+        _rid:
+          type: string
+          description: Request ID — include when reporting issues
+      required:
+      - error
+  responses:
+    RateLimited:
+      description: Too many requests. Every 429 carries `Retry-After`. A quota 429 (`rate_limit_exceeded`, with `X-RateLimit-*`), a heavy-query concurrency 429 (`error_kind` `concurrency`/`capacity`), or the per-IP authentication-failure block (30 failed auths/min; plain `error` + `retry_after_seconds`, no `X-RateLimit-*`).
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        X-RateLimit-Limit:
+          $ref: '#/components/headers/XRateLimitLimit'
+        X-RateLimit-Remaining:
+          $ref: '#/components/headers/XRateLimitRemaining'
+        X-RateLimit-Used:
+          $ref: '#/components/headers/XRateLimitUsed'
+        X-RateLimit-Reset:
+          $ref: '#/components/headers/XRateLimitReset'
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/json:
+          schema:
+            anyOf:
+            - $ref: '#/components/schemas/RateLimitError'
+            - $ref: '#/components/schemas/ConcurrencyLimitError'
+            - $ref: '#/components/schemas/Error'
+          examples:
+            daily:
+              summary: Daily quota exhausted
+              value:
+                error: rate_limit_exceeded
+                error_kind: daily
+                message: Daily rate limit exceeded — 200/day for BASIC tier. Resets at midnight UTC.
+                tier: BASIC
+                limit: 200
+                resets_at: '2026-10-05T00:00:00.000Z'
+                upgrade:
+                  tier: PRO
+                  price_eur_per_month: 43
+                  price_usdc_per_month: 49
+                  daily_limit: 10000
+                  burst_limit: 300
+                  pitch: …
+                  url: https://madeonsol.com/pricing
+                  upgrade_url: https://madeonsol.com/checkout?tier=PRO
+                datasets:
+                  pitch: …
+                  url: https://madeonsol.com/datasets
+            concurrency:
+              summary: Too many heavy queries in flight
+              value:
+                error: Too many concurrent heavy queries. Up to 8 of these endpoints may be in flight at once per key — retry in a moment, or lower your request concurrency.
+                error_kind: concurrency
+                retry_after_seconds: 2
+                max_concurrent: 8
+                _rid: eyJ1IjoiZXhhbXBsZSIsInQiOjE3OTEwMDAwMDAwMDAsImgiOiIwMDAwMDAwMCJ9
+            auth_failures:
+              summary: Per-IP authentication-failure block
+              value:
+                error: Too many authentication failures from this IP. Retry in 60s.
+                retry_after_seconds: 42
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: msk_...
+      description: Get a free API key at https://madeonsol.com/developer
+x-madeonsol-tiers:
+- tier: FREE
+  plan: BASIC
+  name: Free
+  price_eur_monthly: 0
+  price_eur_annual: 0
+  price_usd_monthly: 0
+  daily_limit: 200
+  burst_limit: 60
+  url: https://madeonsol.com/developer
+- tier: PRO
+  plan: PRO
+  name: Pro
+  price_eur_monthly: 43
+  price_eur_annual: 430
+  price_usd_monthly: 49
+  daily_limit: 10000
+  burst_limit: 300
+  url: https://madeonsol.com/checkout?tier=PRO
+- tier: ULTRA
+  plan: ULTRA
+  name: Ultra
+  price_eur_monthly: 131
+  price_eur_annual: 1310
+  price_usd_monthly: 149
+  daily_limit: 100000
+  burst_limit: 600
+  url: https://madeonsol.com/checkout?tier=ULTRA
+- tier: BUSINESS
+  plan: BUSINESS
+  name: Business
+  price_eur_monthly: 400
+  price_eur_annual: 4000
+  price_usd_monthly: 456
+  daily_limit: 500000
+  burst_limit: 3000
+  url: https://madeonsol.com/checkout?tier=BUSINESS
+- tier: ENTERPRISE
+  plan: ENTERPRISE
+  name: Enterprise
+  price_eur_monthly: null
+  price_eur_annual: null
+  price_usd_monthly: null
+  daily_limit: null
+  burst_limit: null
+  url: https://madeonsol.com/pricing#enterprise

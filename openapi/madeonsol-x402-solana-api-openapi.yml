@@ -9,14 +9,14 @@ info:
 servers:
 - url: https://madeonsol.com
 tags:
-- name: Solana
+- name: x402 Solana
 paths:
   /api/x402/kol/coordination:
     get:
       operationId: kol_coordination
       summary: KOL convergence signals — tokens accumulated by multiple KOLs
       tags:
-      - Solana
+      - x402 Solana
       parameters:
       - name: period
         in: query
@@ -79,7 +79,7 @@ paths:
       operationId: kol_feed
       summary: Real-time KOL trade feed from 2,000+ tracked wallets
       tags:
-      - Solana
+      - x402 Solana
       parameters:
       - name: limit
         in: query
@@ -136,7 +136,7 @@ paths:
       operationId: kol_leaderboard
       summary: KOL performance rankings by PnL and win rate
       tags:
-      - Solana
+      - x402 Solana
       parameters:
       - name: period
         in: query
@@ -191,7 +191,7 @@ paths:
       operationId: kol_pairs
       summary: KOL affinity matrix — which KOLs frequently co-trade the same tokens
       tags:
-      - Solana
+      - x402 Solana
       parameters:
       - name: period
         in: query
@@ -252,7 +252,7 @@ paths:
       operationId: kol_tokens_hot
       summary: KOL momentum tokens — tokens with accelerating KOL buy interest
       tags:
-      - Solana
+      - x402 Solana
       parameters:
       - name: period
         in: query
@@ -313,7 +313,7 @@ paths:
       operationId: kol_tokens_trending
       summary: Tokens ranked by KOL buy volume — real-time capital-flow signal
       tags:
-      - Solana
+      - x402 Solana
       parameters:
       - name: period
         in: query
@@ -379,7 +379,7 @@ paths:
       operationId: kol_tokens_mint_entry-order
       summary: Ranked KOL first-buyers for a token — who got in first, seconds after the first…
       tags:
-      - Solana
+      - x402 Solana
       parameters:
       - name: mint
         in: path
@@ -429,7 +429,7 @@ paths:
       operationId: kol_compare
       summary: Side-by-side comparison of 2-5 KOL wallets — full score profiles plus the…
       tags:
-      - Solana
+      - x402 Solana
       parameters:
       - name: wallets
         in: query
@@ -468,7 +468,7 @@ paths:
       operationId: kol_alerts_recent
       summary: Unified recent KOL alert feed — consensus clusters, fresh-token buys by winning…
       tags:
-      - Solana
+      - x402 Solana
       parameters:
       - name: window
         in: query
@@ -527,7 +527,7 @@ paths:
       operationId: deployer-hunter_alerts
       summary: Real-time alerts from tracked Pump.fun deployers (all graded tiers)
       tags:
-      - Solana
+      - x402 Solana
       parameters:
       - name: since
         in: query
@@ -543,7 +543,7 @@ paths:
           type: integer
           minimum: 1
           maximum: 50
-          default: 50
+          default: 20
       - name: offset
         in: query
         required: false
@@ -584,7 +584,7 @@ paths:
       operationId: wallet_address
       summary: Universal wallet stats + cross-product flags (is_kol / is_alpha_tracked /…
       tags:
-      - Solana
+      - x402 Solana
       parameters:
       - name: address
         in: path
@@ -617,7 +617,7 @@ paths:
       operationId: wallet_address_pnl
       summary: FIFO cost-basis PnL — realized + unrealized + daily curve + closed/open…
       tags:
-      - Solana
+      - x402 Solana
       parameters:
       - name: address
         in: path
@@ -650,7 +650,7 @@ paths:
       operationId: wallet_address_positions
       summary: Open positions only — lighter slice of /pnl, shares the same cache
       tags:
-      - Solana
+      - x402 Solana
       parameters:
       - name: address
         in: path
@@ -691,7 +691,7 @@ paths:
       operationId: wallet_address_trades
       summary: Cursor-paginated raw trades — filter by action / token / time window
       tags:
-      - Solana
+      - x402 Solana
       parameters:
       - name: address
         in: path
@@ -774,7 +774,7 @@ paths:
       operationId: tokens_mint_risk
       summary: 0–100 token risk score with named factors (mint/freeze authority, liquidity…
       tags:
-      - Solana
+      - x402 Solana
       parameters:
       - name: mint
         in: path
@@ -807,7 +807,7 @@ paths:
       operationId: tokens_mint_buyer-quality
       summary: Early-buyer quality score — dump-cluster exposure, recycled-wallet rate…
       tags:
-      - Solana
+      - x402 Solana
       parameters:
       - name: mint
         in: path
@@ -840,7 +840,7 @@ paths:
       operationId: token_mint
       summary: Live token snapshot — price (USD/SOL), market cap, FDV, liquidity, liquidity/MC…
       tags:
-      - Solana
+      - x402 Solana
       parameters:
       - name: mint
         in: path
@@ -873,7 +873,7 @@ paths:
       operationId: signals_name_performance
       summary: Signal Scorecard — out-of-sample reliability (hit rate, base rate, lift, sample…
       tags:
-      - Solana
+      - x402 Solana
       parameters:
       - name: name
         in: path
@@ -930,7 +930,7 @@ paths:
       operationId: tokens_mint_candles
       summary: OHLCV candles (1m–1d timeframes, 30d history) with per-candle volume, trade…
       tags:
-      - Solana
+      - x402 Solana
       parameters:
       - name: mint
         in: path
@@ -966,7 +966,7 @@ paths:
       - name: from
         in: query
         required: false
-        description: ISO8601 window start (default limit*tf before `to`; capped to the last 30 days)
+        description: 'ISO8601 window start (default limit*tf before `to`; floored to the last 30 days measured from now — a window entirely older returns 200 with no candles and history_outside_plan: true)'
         schema:
           type: string
       - name: to
@@ -1006,7 +1006,7 @@ paths:
       operationId: tokens_mint_flow
       summary: Buy/sell trade flow — unique buyers/sellers, SOL in/out, net flow, and a…
       tags:
-      - Solana
+      - x402 Solana
       parameters:
       - name: mint
         in: path
@@ -1049,7 +1049,7 @@ paths:
       operationId: tokens_mint_top-traders
       summary: Wallets ranked by realized PnL (or ROI) on a token — enriched with KOL identity…
       tags:
-      - Solana
+      - x402 Solana
       parameters:
       - name: mint
         in: path
@@ -1126,7 +1126,7 @@ paths:
       operationId: tokens_mint_cap-table
       summary: Early-buyer cap table — first 10 non-deployer buyers with PnL, exit status…
       tags:
-      - Solana
+      - x402 Solana
       parameters:
       - name: mint
         in: path
@@ -1167,7 +1167,7 @@ paths:
       operationId: tokens_almost-bonded
       summary: Launchpad tokens approaching graduation — bonding progress, velocity…
       tags:
-      - Solana
+      - x402 Solana
       parameters:
       - name: min_progress
         in: query
@@ -1289,7 +1289,7 @@ paths:
       operationId: sniper_recent
       summary: Recent deploys from elite/good-tier tracked deployers — deshred-detected, with…
       tags:
-      - Solana
+      - x402 Solana
       parameters:
       - name: limit
         in: query
@@ -1354,7 +1354,7 @@ paths:
       operationId: deployer-hunter_address_trajectory
       summary: Deployer bond-rate trajectory — streaks, rolling 10-token windows, trend…
       tags:
-      - Solana
+      - x402 Solana
       parameters:
       - name: address
         in: path

@@ -1,0 +1,2680 @@
+openapi: 3.2.0
+info:
+  title: MadeOnSol Wallet API
+  version: 1.20.0
+  description: Real-time Solana & Robinhood Chain trading intelligence — KOL wallet trades, deployer reputation, token buyer-quality scoring, wallet tracking, and copy-trade signals across both chains (Robinhood Chain paths under `/rhc/*`).
+  contact:
+    name: MadeOnSol
+    url: https://madeonsol.com/contact
+  license:
+    name: Proprietary
+    url: https://madeonsol.com/terms
+servers:
+- url: https://madeonsol.com/api/v1
+  description: Production
+security:
+- BearerAuth: []
+tags:
+- name: Wallet
+  description: 'Universal per-wallet endpoints: aggregate stats with cross-product flags, FIFO cost-basis PnL with daily curve, open positions with live unrealized, and cursor-paginated raw trades. PRO+.'
+paths:
+  /wallet/{address}/funding:
+    get:
+      tags:
+      - Wallet
+      summary: Shared-funder evidence for a tracked wallet (PRO+)
+      description: Addresses that sent a qualifying SOL transfer to this wallet AND to other tracked wallets (active KOLs, elite/good deployers), with the supporting transactions. Evidence of a funding connection — not proof of common ownership, manipulation or coordinated trading. Forward-looking coverage from monitoring start (no historical backfill); SOL-only in V1 (SPL/Token-2022 not supported). Known exchange/service funders are marked `service_funder`.
+      parameters:
+      - name: address
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Solana wallet (base58).
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 20
+          default: 10
+        description: Shared funders per page.
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          minimum: 0
+          maximum: 100
+          default: 0
+      responses:
+        '200':
+          description: 'OK. `status`: ok | partial_coverage | not_tracked | collection_disabled | collection_stale | not_started. `collection_stale` = the collector has not reported within the staleness window, so evidence after `coverage.heartbeat_at` may be missing. An empty `shared_funders` with status ok means no shared funder was OBSERVED within coverage — never that wallets are independent.'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  chain:
+                    type: string
+                    enum:
+                    - solana
+                    - robinhood
+                  chain_id:
+                    type: string
+                  native_asset:
+                    type: string
+                  address:
+                    type: string
+                  status:
+                    type: string
+                    enum:
+                    - ok
+                    - partial_coverage
+                    - not_tracked
+                    - collection_disabled
+                    - collection_stale
+                    - not_started
+                  summary:
+                    type: string
+                  shared_funders:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        funder:
+                          type: string
+                        funder_explorer_url:
+                          type: string
+                        funder_label:
+                          type: object
+                          nullable: true
+                          properties:
+                            label:
+                              type: string
+                            category:
+                              type: string
+                            verified:
+                              type: boolean
+                        service_funder:
+                          type: boolean
+                          description: 'Known exchange/service: a common funding source, not a connection signal'
+                        to_this_wallet:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              asset:
+                                type: string
+                                description: '''native'' or the token contract'
+                              symbol:
+                                type: string
+                                nullable: true
+                              decimals:
+                                type: integer
+                                nullable: true
+                              amount_raw:
+                                type: string
+                                description: Exact integer (raw units)
+                              amount:
+                                type: string
+                                nullable: true
+                                description: Exact decimal string when decimals are known
+                              transfer_count:
+                                type: integer
+                              first_seen:
+                                type: string
+                                format: date-time
+                                description: Chain block time of the earliest transfer when resolved; otherwise the collector's observation time (Solana block times are resolved asynchronously and can stay unknown after bounded retries). Not a guaranteed on-chain timestamp.
+                              last_seen:
+                                type: string
+                                format: date-time
+                                description: Same basis as first_seen, for the latest transfer.
+                              transactions:
+                                type: array
+                                items:
+                                  type: object
+                                  properties:
+                                    tx:
+                                      type: string
+                                    explorer_url:
+                                      type: string
+                        connected_wallets:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              address:
+                                type: string
+                              explorer_url:
+                                type: string
+                              tracked_as:
+                                type: array
+                                items:
+                                  type: string
+                              transfers:
+                                type: array
+                                items:
+                                  type: object
+                                  properties:
+                                    asset:
+                                      type: string
+                                      description: '''native'' or the token contract'
+                                    symbol:
+                                      type: string
+                                      nullable: true
+                                    decimals:
+                                      type: integer
+                                      nullable: true
+                                    amount_raw:
+                                      type: string
+                                      description: Exact integer (raw units)
+                                    amount:
+                                      type: string
+                                      nullable: true
+                                      description: Exact decimal string when decimals are known
+                                    transfer_count:
+                                      type: integer
+                                    first_seen:
+                                      type: string
+                                      format: date-time
+                                      description: Chain block time of the earliest transfer when resolved; otherwise the collector's observation time (Solana block times are resolved asynchronously and can stay unknown after bounded retries). Not a guaranteed on-chain timestamp.
+                                    last_seen:
+                                      type: string
+                                      format: date-time
+                                      description: Same basis as first_seen, for the latest transfer.
+                                    transactions:
+                                      type: array
+                                      items:
+                                        type: object
+                                        properties:
+                                          tx:
+                                            type: string
+                                          explorer_url:
+                                            type: string
+                  pagination:
+                    type: object
+                    properties:
+                      limit:
+                        type: integer
+                      offset:
+                        type: integer
+                      total:
+                        type: integer
+                      has_more:
+                        type: boolean
+                  coverage:
+                    type: object
+                    additionalProperties: true
+                    description: collection_enabled, mode (off|shadow|on), heartbeat_at, collector_current, monitoring_started_at, last_committed_position, last_committed_at, tracked_intervals, known_gaps, supported/unsupported transfer types, recovery, history note
+                  disclaimer:
+                    type: string
+                  direct_funding:
+                    type: object
+                    additionalProperties: true
+                    description: 'Optional, additive: where THIS wallet was funded from (the same block as `funding` on the wallet/deployer profiles). Absent when the direct read fails — the shared-funder answer above still stands. `observed: false` carries `coverage`, `coverage_explanation`, `observation_started_at` and `note` (no funding observed within coverage is not evidence the wallet was never funded). `observed: true` adds the coverage fields, `asset_scope`, `native_funding`, `token_funding`, `sources[]` and `source_count` (PRO); cross-wallet `relationships` counts are ULTRA+ and removed below ULTRA.'
+                    properties:
+                      observed:
+                        type: boolean
+                      coverage:
+                        type: string
+                        description: Coverage level of the funding evidence, e.g. forward_only.
+                      coverage_explanation:
+                        type: string
+                      observation_started_at:
+                        type: string
+                        format: date-time
+                        nullable: true
+                      note:
+                        type: string
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '400':
+          description: Invalid address or query parameters.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Missing or invalid API key.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Tier below PRO.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          description: '`code: feature_disabled` (feature switched off by the operator; on in production since 2026-09-20) or `code: funding_data_unavailable` (data error — NOT an empty result; retry).'
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      x-madeonsol-tier: PRO
+      x-badges:
+      - name: PRO
+        position: after
+        color: '#1d4ed8'
+      operationId: getWalletByAddressFunding
+      x-operation-id-source: derived
+  /wallet/{address}/flags:
+    get:
+      tags:
+      - Wallet
+      summary: Point-in-time wallet flags (PRO+)
+      description: '"What did you know about this wallet on date D." For every flag source — `deployer` (tier, tracked/blocked/flagged, bonds, instant_bonds, runner_rate), `alpha` (bot_confidence, win_rate, bundle_rate…), `dump_cluster`, `kol`, `sniper`, `bundler` — the latest write-on-change snapshot at or before `as_of` (default: now). `carried: true` = the state was recorded earlier and had not changed by `as_of`; `null` = no snapshot at or before `as_of` (we had nothing on the wallet then); membership sources carry `active: false` after the wallet dropped out. `history=true` adds the change series for audit trails. Snapshots exist from 2026-08-28 (daily 01:20 UTC).'
+      parameters:
+      - name: address
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Solana wallet (base58).
+      - name: as_of
+        in: query
+        schema:
+          type: string
+          format: date-time
+        description: 'ISO-8601 with offset. Default: now.'
+      - name: history
+        in: query
+        schema:
+          type: boolean
+          default: false
+        description: Include the change series (newest first, ≤ 200 rows).
+      responses:
+        '200':
+          description: OK. `{ wallet, as_of, flagged[], sources{ deployer, alpha, dump_cluster, kol, sniper, bundler }, history?[], note }`.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  wallet:
+                    type: string
+                  as_of:
+                    type: string
+                    format: date-time
+                  flagged:
+                    type: array
+                    items:
+                      type: string
+                      enum:
+                      - deployer
+                      - alpha
+                      - dump_cluster
+                      - kol
+                      - sniper
+                      - bundler
+                    description: Sources with a snapshot at or before as_of whose latest state is still active
+                  sources:
+                    type: object
+                    description: One key per flag source; null = no snapshot at or before as_of
+                    properties:
+                      deployer:
+                        type: object
+                        nullable: true
+                        description: tier, tracked/blocked/flagged, bonds, instant_bonds, runner_rate, plus snapshot_at/active/carried
+                        additionalProperties: true
+                      alpha:
+                        type: object
+                        nullable: true
+                        description: bot_confidence, win_rate, bundle_rate…, plus snapshot_at/active/carried
+                        additionalProperties: true
+                      dump_cluster:
+                        type: object
+                        nullable: true
+                        additionalProperties: true
+                      kol:
+                        type: object
+                        nullable: true
+                        additionalProperties: true
+                      sniper:
+                        type: object
+                        nullable: true
+                        additionalProperties: true
+                      bundler:
+                        type: object
+                        nullable: true
+                        additionalProperties: true
+                  history:
+                    type: array
+                    nullable: true
+                    description: Present when history=true (newest first, ≤ 200 rows)
+                    items:
+                      type: object
+                      properties:
+                        source:
+                          type: string
+                        flags:
+                          type: object
+                          additionalProperties: true
+                        snapshot_at:
+                          type: string
+                          format: date-time
+                  note:
+                    type: string
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Tier below PRO.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: PRO
+      x-badges:
+      - name: PRO
+        position: after
+        color: '#1d4ed8'
+      operationId: getWalletByAddressFlags
+      x-operation-id-source: derived
+  /wallet/batch/trades:
+    post:
+      tags:
+      - Wallet
+      summary: Recent trades for up to 50 wallets in one call
+      description: 'The batch twin of `GET /wallet/{address}/trades`: same rows, same fields, same 90-day window — for **up to 50 wallets per request**, up to 100 trades each, newest first. Pass `since` (unix seconds) and you get only trades newer than that across every wallet; the response''s `next_since` is the newest `block_time` seen, so feed it straight back on the next poll. Missing wallets come back with an empty `trades` array — *not observed*, never a 404.
+
+
+        **Why:** sweeping many wallets through the single-wallet route costs one request per wallet; fifty lookups in one call is one round-trip and one quota unit. Trades carry `price_sol`/`price_usd` (executed) and `market_price_sol`/`market_price_usd` (canonical) exactly like the single route.
+
+
+        **Coverage honesty:** the tape is the pump.fun / LaunchLab / bags pipeline — a wallet''s Raydium-native or Meteora memecoin trades are not on it; the `coverage` block says so. PRO+.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - wallets
+              properties:
+                wallets:
+                  type: array
+                  items:
+                    type: string
+                  minItems: 1
+                  maxItems: 50
+                  description: Base58 wallet addresses. Also accepts a comma-separated string.
+                since:
+                  type: integer
+                  description: 'Unix seconds; only trades strictly after this. Default: 90 days ago (cannot reach further back).'
+                limit_per_wallet:
+                  type: integer
+                  minimum: 1
+                  maximum: 100
+                  default: 20
+                action:
+                  type: string
+                  enum:
+                  - buy
+                  - sell
+      responses:
+        '200':
+          description: OK — `wallets[]` of `{wallet, count, trades[]}` plus `since`, `next_since`, `limit_per_wallet`, `coverage`
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  wallets:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        wallet:
+                          type: string
+                        count:
+                          type: integer
+                        trades:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              tx_signature:
+                                type: string
+                              token_mint:
+                                type: string
+                              action:
+                                type: string
+                                enum:
+                                - buy
+                                - sell
+                              sol_amount:
+                                type: number
+                              token_amount:
+                                type: number
+                              price_sol:
+                                type: number
+                                nullable: true
+                                description: This trade's executed price (sol_amount / token_amount)
+                              price_usd:
+                                type: number
+                                nullable: true
+                              market_price_sol:
+                                type: number
+                                nullable: true
+                                description: Canonical pool price sampled near this trade's slot
+                              market_price_usd:
+                                type: number
+                                nullable: true
+                              block_time:
+                                type: integer
+                              traded_at:
+                                type: string
+                                format: date-time
+                  since:
+                    type: integer
+                  next_since:
+                    type: integer
+                    description: Newest block_time seen — feed back as `since` on the next poll
+                  limit_per_wallet:
+                    type: integer
+                  coverage:
+                    type: object
+                    properties:
+                      history_start_days:
+                        type: integer
+                      scope:
+                        type: string
+                      note:
+                        type: string
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '400':
+          description: Invalid body
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+      x-madeonsol-tier: PRO
+      x-badges:
+      - name: PRO
+        position: after
+        color: '#1d4ed8'
+      operationId: postWalletBatchTrades
+      x-operation-id-source: derived
+  /wallet/batch/classify:
+    post:
+      tags:
+      - Wallet
+      summary: Batch wallet reputation flags (up to 100 addresses)
+      description: 'Bulk reputation classification: `is_sniper`, `is_bundler`, `is_dumper` (+ raw dump-cluster cohort counts), `is_kol`, and `bot_confidence` for up to 100 wallets in one call. Flag values match the `flags` block on `GET /wallet/{address}` exactly.
+
+
+        **Semantics**: flags derive from the pump.fun trade pipeline — `false` means "not observed", not "verified clean". `is_sniper` is behavior-updated (hourly); `is_bundler` is a lifetime flag; `is_dumper` uses a rolling 42-day window recomputed daily. PRO+.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - wallets
+              properties:
+                wallets:
+                  type: array
+                  items:
+                    type: string
+                  minItems: 1
+                  maxItems: 100
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  coverage:
+                    $ref: '#/components/schemas/LaunchCoverage'
+                  wallets:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        address:
+                          type: string
+                        is_sniper:
+                          type: boolean
+                        is_bundler:
+                          type: boolean
+                        is_dumper:
+                          type: boolean
+                        is_kol:
+                          type: boolean
+                        kol_name:
+                          type: string
+                          nullable: true
+                        bot_confidence:
+                          type: string
+                          nullable: true
+                          enum:
+                          - none
+                          - low
+                          - medium
+                          - high
+                          description: null when not observed
+                        dump_cluster:
+                          type: object
+                          nullable: true
+                          properties:
+                            dump_cohorts:
+                              type: integer
+                            runner_cohorts:
+                              type: integer
+                            total_cohorts:
+                              type: integer
+                            as_of:
+                              type: string
+                              format: date-time
+                  count:
+                    type: integer
+                  as_of:
+                    type: string
+                    format: date-time
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '400':
+          description: Invalid body
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: PRO
+      x-badges:
+      - name: PRO
+        position: after
+        color: '#1d4ed8'
+      operationId: postWalletBatchClassify
+      x-operation-id-source: derived
+  /wallet-list/score:
+    post:
+      tags:
+      - Wallet
+      summary: Custom wallet-list scoring (up to 200 addresses)
+      description: 'Enterprise only. Scores an arbitrary, customer-supplied list of Solana wallets on real FIFO cost-basis trading performance — not membership in our pre-tracked KOL/alpha lists (any wallet works, same as `GET /wallet/{address}/pnl`). Each wallet gets a transparent 0-100 `score` (50% win rate on closed positions + 50% profit factor, capped 5x — see `score_methodology` in the response), the full PnL summary, and the same reputation flags as `/wallet/batch/classify`.
+
+
+        **Live-compute cap**: PnL is the expensive half of `/pnl` (up to 50k paginated trades + FIFO). Up to 200 wallets per call, but only the first 25 UNCACHED wallets are computed inline per request — the rest come back `status: "not_computed"`. Cached wallets (recently scored, or recently looked up via `/wallet/{address}/pnl`) are always free regardless of the cap. Resubmit a `not_computed` address alone, or call again shortly, to pick up its score once warm.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - wallets
+              properties:
+                wallets:
+                  type: array
+                  items:
+                    type: string
+                  minItems: 1
+                  maxItems: 200
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  wallets:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        address:
+                          type: string
+                        status:
+                          type: string
+                          enum:
+                          - scored
+                          - no_trades
+                          - not_computed
+                        score:
+                          type: integer
+                          nullable: true
+                          description: 0-100. null when there are no closed positions to score (open-only, no_trades, or not_computed).
+                        pnl:
+                          type: object
+                          nullable: true
+                          description: Same shape as GET /wallet/{address}/pnl's `summary` block. null unless status is "scored".
+                        reputation:
+                          type: object
+                          properties:
+                            is_sniper:
+                              type: boolean
+                            is_bundler:
+                              type: boolean
+                            is_dumper:
+                              type: boolean
+                            is_kol:
+                              type: boolean
+                            kol_name:
+                              type: string
+                              nullable: true
+                            bot_confidence:
+                              type: string
+                              nullable: true
+                              enum:
+                              - none
+                              - low
+                              - medium
+                              - high
+                        cache_hit:
+                          type: boolean
+                          nullable: true
+                        computed_at:
+                          type: string
+                          format: date-time
+                          nullable: true
+                        cache_age_seconds:
+                          type: integer
+                          nullable: true
+                          description: Seconds since computed_at (source age survives a cache hit)
+                        message:
+                          type: string
+                          description: Present only when status is "not_computed".
+                  count:
+                    type: integer
+                  scored:
+                    type: integer
+                  cached:
+                    type: integer
+                  computed_now:
+                    type: integer
+                  no_trades:
+                    type: integer
+                  not_computed:
+                    type: integer
+                  max_wallets:
+                    type: integer
+                    example: 200
+                  max_live_compute:
+                    type: integer
+                    example: 25
+                  score_methodology:
+                    type: string
+                  as_of:
+                    type: string
+                    format: date-time
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '400':
+          description: Invalid body — not an array of 1-200 base58 addresses
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Requires the Enterprise contract tier (hand-sold — see /pricing#enterprise)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: ENTERPRISE
+      x-badges:
+      - name: ENTERPRISE
+        position: after
+        color: '#0f172a'
+      operationId: postWalletListScore
+      x-operation-id-source: derived
+  /wallet/{address}:
+    get:
+      tags:
+      - Wallet
+      summary: Wallet stats + flags + enrichments
+      description: 'Aggregate counters for any Solana wallet over the last 90 days plus cross-product flags joining `kol_wallets`, `mv_alpha_wallets` (incl. bot_confidence), `deployers`, and the reputation caches (`is_sniper`, `is_bundler`, `is_dumper` + dump-cluster cohort counts). Backed by `idx_token_trades_wallet_cover` — sub-100ms even on heavy wallets. Returns 404 if the wallet has no trades AND no flag-table presence.
+
+
+        **v1.8.1 enrichments** (additive, non-breaking): also returns `top_tokens` (top-traded tokens with realized PnL + peak MC), `trading_style` (avg trade size, sniper-rate, round-trip rate, median hold), `deployer_breakdown` (tier-distribution of deployers bought from), and `recent_trades` (last 10 trades with symbols). PRO+.'
+      parameters:
+      - name: address
+        in: path
+        required: true
+        schema:
+          type: string
+          example: 2FxiPRPLYX3H84FZkdRiUHDgDm4U5u98etbL4yvZ3qRq
+          description: Base58 wallet address
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WalletStats'
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '400':
+          description: Invalid wallet address
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '404':
+          description: Wallet has no recorded activity
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: PRO
+      x-badges:
+      - name: PRO
+        position: after
+        color: '#1d4ed8'
+      operationId: getWalletByAddress
+      x-operation-id-source: derived
+  /wallet/{address}/pnl:
+    get:
+      tags:
+      - Wallet
+      summary: FIFO cost-basis PnL with daily curve
+      description: 'Full per-wallet PnL: realized + unrealized SOL, profit factor, max drawdown, avg + median hold minutes, daily UTC PnL curve, closed positions sorted by pnl desc (with ROI %, hold minutes, win/loss/breakeven), and open positions hydrated with current prices from market-cap tracker.
+
+
+        **Caching**: stored in `wallet_analyses` with dynamic TTL — 5 min for wallets active in last 24h, 1h for 1-7d old, 24h for dormant. Every hit is validated against the wallet''s trade head (audit F16): a wallet that traded after the cached analysis is recomputed (`cache_invalidated: new_activity`), so a resumed dormant wallet never gets a day-old answer. `cache_age_seconds` + `computed_at` carry the source age on a hit. Cache hits don''t count against your daily quota.
+
+
+        **Honesty note**: two limits, both disclosed in the response. (1) Time — cost basis is only observable inside our 90-day data window, and capture itself starts 2026-04-12; a wallet that sold tokens bought before that has the overflow silently discarded rather than fabricated (`notes.cost_basis_observable_from` surfaces the cutoff). (2) Token universe — persisted trades are gated to the launchpad pipeline (pump.fun, LaunchLab/bonk, bags), so a wallet trading outside it is not partially covered but uncovered. The `coverage` object reports `in_scope`; when it is false, zero and empty results mean ''not captured'', not ''no activity''. PRO+.'
+      parameters:
+      - name: address
+        in: path
+        required: true
+        schema:
+          type: string
+          example: 2FxiPRPLYX3H84FZkdRiUHDgDm4U5u98etbL4yvZ3qRq
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WalletPnl'
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '400':
+          description: Invalid wallet address
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '404':
+          description: Wallet has no trades in the data window
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: PRO
+      x-badges:
+      - name: PRO
+        position: after
+        color: '#1d4ed8'
+      operationId: getWalletByAddressPnl
+      x-operation-id-source: derived
+  /wallet/{address}/positions:
+    get:
+      tags:
+      - Wallet
+      summary: Open positions only (leaner /pnl slice)
+      description: 'Open lots only — same data as `/pnl` `open_positions[]` but without the summary, curve, or closed-positions payload. Shares the `wallet_analyses` cache: if you''ve recently called `/pnl` for this wallet, this call is an immediate cache hit. PRO+.'
+      parameters:
+      - name: address
+        in: path
+        required: true
+        schema:
+          type: string
+          example: 2FxiPRPLYX3H84FZkdRiUHDgDm4U5u98etbL4yvZ3qRq
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  address:
+                    type: string
+                  positions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/WalletOpenPosition'
+                  cache_hit:
+                    type: boolean
+                  computed_at:
+                    type: string
+                    format: date-time
+                    nullable: true
+                  cache_age_seconds:
+                    type: integer
+                    description: Cache hits only — seconds since computed_at
+                  cache_validation:
+                    type: string
+                    enum:
+                    - head_checked
+                    - unverified
+                    description: 'Cache hits only (audit F16): head_checked = the wallet has no persisted trade newer than the analysis watermark, so the cached analysis is current; unverified = the trade-head probe failed and the unexpired cache was served flagged. A hit whose wallet traded after the watermark is never served — it is recomputed.'
+                  cache_invalidated:
+                    type: string
+                    enum:
+                    - new_activity
+                    description: Present on a recompute that happened because a cached analysis existed but the wallet traded after it
+                  ttl_seconds:
+                    type: integer
+                    nullable: true
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '400':
+          description: Invalid wallet address
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AuthBackendUnavailable'
+      x-madeonsol-tier: PRO
+      x-badges:
+      - name: PRO
+        position: after
+        color: '#1d4ed8'
+      operationId: getWalletByAddressPositions
+      x-operation-id-source: derived
+  /wallet/{address}/holdings:
+    get:
+      tags:
+      - Wallet
+      summary: Verified current on-chain holdings (ULTRA)
+      description: The wallet's ACTUAL current token balances, read live from chain (SPL + Token-2022 accounts + SOL balance), then enriched from our data (price, market cap, name/symbol). Unlike `/positions` (trade-derived FIFO — transfer-blind, launchpad-scoped), this is a chain-verified holdings census. Each holding carries `transfer_delta` = on-chain amount minus the trade-derived net position, which exposes tokens that arrived/left WITHOUT a swap (airdrops, insider funding, wallet-hopping). 90s cache; 6 uncached lookups/min/user. ULTRA only.
+      parameters:
+      - name: address
+        in: path
+        required: true
+        schema:
+          type: string
+          example: 2FxiPRPLYX3H84FZkdRiUHDgDm4U5u98etbL4yvZ3qRq
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 200
+      - name: min_value_usd
+        in: query
+        required: false
+        schema:
+          type: number
+          minimum: 0
+          default: 0
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  address:
+                    type: string
+                  sol_balance:
+                    type: number
+                  holdings:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/WalletHolding'
+                  summary:
+                    type: object
+                    properties:
+                      token_accounts:
+                        type: integer
+                      non_zero:
+                        type: integer
+                      returned:
+                        type: integer
+                      priced:
+                        type: integer
+                      total_value_usd:
+                        type: number
+                      truncated:
+                        type: boolean
+                  verified_at:
+                    type: string
+                    format: date-time
+                  trade_window_days:
+                    type: integer
+                  cache_hit:
+                    type: boolean
+                  ttl_seconds:
+                    type: integer
+                  coverage:
+                    $ref: '#/components/schemas/TradeCoverage'
+                    description: Disambiguates trade_derived_amount:null — in_scope:false means the WALLET has no captured trades at all, so every null is a coverage gap, not a transfer signal.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+        '400':
+          description: Invalid wallet address
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          description: Temporarily too heavy — either the upstream RPC is busy or the wallet holds too many tokens to aggregate right now. Retry shortly (retry_after_seconds).
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      x-madeonsol-tier: ULTRA
+      x-badges:
+      - name: ULTRA
+        position: after
+        color: '#b45309'
+      operationId: getWalletByAddressHoldings
+      x-operation-id-source: derived
+  /wallet/{address}/trades:
+    get:
+      tags:
+      - Wallet
+      summary: Paginated raw trades for any wallet
+      description: 'Cursor-paginated `token_trades` rows for the wallet (launchpad-pipeline mints only). Buys under 0.05 SOL (under $3.50 when paid in USDC/USDT) are not stored; sells that receive SOL are kept at any size. Filters by action and/or token_mint. `since`/`until` Unix timestamps default to a 90-day window. Cursor is base64(`block_time:id`) — stable across DESC pagination. PRO+.
+
+
+        *Added 2026-08-16*: `price_sol`/`price_usd` (this trade''s executed price, `sol_amount / token_amount`) and `market_price_sol`/`market_price_usd` (canonical pool price near the trade''s slot). Same definitions as `/tokens/{mint}/trades` — see that endpoint for which to use when.
+
+
+        *Added 2026-09-07*: history below the Postgres floor is served from the Parquet archive — an explicit `since` older than `history.postgres_from` no longer returns an empty page. Same `history` block and `X-Read-Source` header as `/tokens/{mint}/trades`.'
+      parameters:
+      - name: address
+        in: path
+        required: true
+        schema:
+          type: string
+          example: 2FxiPRPLYX3H84FZkdRiUHDgDm4U5u98etbL4yvZ3qRq
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 100
+      - name: cursor
+        in: query
+        schema:
+          type: string
+          description: From `next_cursor` of previous response
+      - name: action
+        in: query
+        schema:
+          type: string
+          enum:
+          - buy
+          - sell
+      - name: token_mint
+        in: query
+        schema:
+          type: string
+          description: Filter to a single token
+      - name: since
+        in: query
+        schema:
+          type: integer
+          description: Unix epoch seconds — default now-90d
+      - name: until
+        in: query
+        schema:
+          type: integer
+          description: Unix epoch seconds — default now
+      responses:
+        '200':
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+            X-Data-Delay:
+              $ref: '#/components/headers/XDataDelay'
+            X-MadeOnSol-Quota-Warning:
+              $ref: '#/components/headers/XMadeOnSolQuotaWarning'
+            X-Read-Source:
+              schema:
+                type: string
+                enum:
+                - core
+                - core+archive
+                - archive
+              description: 'Where this page''s rows came from: Postgres only, Postgres plus the Parquet archive (page straddles `history.postgres_from`), or the archive only.'
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  address:
+                    type: string
+                  trades:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/WalletTrade'
+                  next_cursor:
+                    type: string
+                    nullable: true
+                  has_more:
+                    type: boolean
+                  filters:
+                    type: object
+                    properties:
+                      action:
+                        type: string
+                        nullable: true
+                      token_mint:
+                        type: string
+                        nullable: true
+                      since:
+                        type: integer
+                      until:
+                        type: integer
+                  history:
+                    type: object
+                    description: Postgres/archive split for this page (added 2026-09-07, same semantics as `/tokens/{mint}/trades`). Rows at/after `postgres_from` come from Postgres, older rows from the Parquet archive, with one ordering and one cursor across the boundary. The 90-day default window sits above the floor, so only an explicit older `since` touches the archive.
+                    properties:
+                      postgres_from:
+                        type: integer
+                        description: Unix seconds — rows at/after this come from Postgres, older from the archive
+                      archive_used:
+                        type: boolean
+                      archive_months:
+                        type: array
+                        items:
+                          type: string
+                      archive_available:
+                        type: boolean
+                        nullable: true
+                        description: null = archive reader not configured
+                      truncated:
+                        type: boolean
+                        description: true = older history was requested but the archive did not answer — do not treat has_more:false as the end of the tape
+                      note:
+                        type: string
+                        description: Present when the archive could not be reached or is not configured
+                  coverage:
+                    $ref: '#/components/schemas/TradeCoverage'
+                    description: 'Per-wallet coverage probe. `in_scope: null` with a note when the wallet''s history lives in the archive and the archive did not answer (inconclusive, not empty).'
+        '400':
+          description: Invalid wallet, action, mint, or inverted since/until
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Used:
+              $ref: '#/components/headers/XRateLimitUsed'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/TierForbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+      x-madeonsol-tier: PRO
+      x-badges:
+      - name: PRO
+        position: after
+        color: '#1d4ed8'
+      operationId: getWalletByAddressTrades
+      x-operation-id-source: derived
+components:
+  schemas:
+    WalletHolding:
+      type: object
+      description: One chain-verified token holding. `transfer_delta` = on-chain amount minus trade-derived net (non-null only when the mint was traded in-window); a large positive delta flags tokens received without a swap.
+      properties:
+        mint:
+          type: string
+        symbol:
+          type: string
+          nullable: true
+        name:
+          type: string
+          nullable: true
+        amount:
+          type: number
+        amount_raw:
+          type: string
+          description: Raw integer amount (pre-decimals) as a string.
+        decimals:
+          type: integer
+        token_program:
+          type: string
+          enum:
+          - spl
+          - token2022
+        price_usd:
+          type: number
+          nullable: true
+        value_usd:
+          type: number
+          nullable: true
+        market_cap_usd:
+          type: number
+          nullable: true
+        is_bonded:
+          type: boolean
+          nullable: true
+        trade_derived_amount:
+          type: number
+          nullable: true
+        transfer_delta:
+          type: number
+          nullable: true
+    DemoKeyNotAllowedError:
+      type: object
+      description: 403 for the public demo key (`msk_demo_…`) outside its three-endpoint allow-list. `endpoint_tier` is the endpoint's real minimum plan (null when unknown).
+      required:
+      - error
+      - message
+      - allowed_endpoints
+      properties:
+        error:
+          type: string
+          enum:
+          - demo_key_endpoint_not_allowed
+        message:
+          type: string
+        endpoint_tier:
+          type: string
+          nullable: true
+          enum:
+          - FREE
+          - PRO
+          - ULTRA
+          - BUSINESS
+          - ENTERPRISE
+          - null
+        allowed_endpoints:
+          type: array
+          items:
+            type: string
+        signup_url:
+          type: string
+          format: uri
+        upgrade_url:
+          type: string
+          format: uri
+          description: Only when the endpoint's tier can be bought at /checkout.
+    ConcurrencyLimitError:
+      type: object
+      description: '429 from the heavy-query limiter: too many heavy requests in flight for this key (`concurrency`) or for the whole server (`capacity`). Clears as soon as in-flight requests finish.'
+      required:
+      - error
+      - error_kind
+      - retry_after_seconds
+      properties:
+        error:
+          type: string
+        error_kind:
+          type: string
+          enum:
+          - concurrency
+          - capacity
+        retry_after_seconds:
+          type: number
+        max_concurrent:
+          type: integer
+        support:
+          type: string
+        _rid:
+          type: string
+    TierRequiredError:
+      type: object
+      description: 403 when the key's tier is below the endpoint's (or a parameter's) gate. `required_tier` matches the operation's `x-madeonsol-tier` or `x-madeonsol-feature-tiers`. ENTERPRISE gates return `contact` instead of `upgrade`.
+      required:
+      - error
+      - message
+      - your_tier
+      - required_tier
+      properties:
+        error:
+          type: string
+          enum:
+          - tier_required
+        message:
+          type: string
+        feature:
+          type: string
+        your_tier:
+          type: string
+          enum:
+          - BASIC
+          - PRO
+          - ULTRA
+          - BUSINESS
+          - ENTERPRISE
+        required_tier:
+          type: string
+          enum:
+          - PRO
+          - ULTRA
+          - BUSINESS
+          - ENTERPRISE
+        upgrade:
+          type: object
+          description: The plan that lifts this limit, with price and a checkout link.
+          properties:
+            tier:
+              type: string
+              enum:
+              - PRO
+              - ULTRA
+              - BUSINESS
+              - ENTERPRISE
+            price_eur_per_month:
+              type: number
+            price_usdc_per_month:
+              type: number
+            daily_limit:
+              type: integer
+            burst_limit:
+              type: integer
+            pitch:
+              type: string
+            url:
+              type: string
+            upgrade_url:
+              type: string
+              format: uri
+            reactivate:
+              type: boolean
+              description: Present (true) when the key's paid subscription has just lapsed and `tier` is the plan it held.
+            prior_tier:
+              type: string
+              enum:
+              - PRO
+              - ULTRA
+              - BUSINESS
+        contact:
+          type: object
+          properties:
+            url:
+              type: string
+            contact_url:
+              type: string
+            pitch:
+              type: string
+        support:
+          type: string
+        _rid:
+          type: string
+    TradeCoverage:
+      type: object
+      description: 'Coverage disclosure for endpoints backed by our persisted trade capture (`token_trades` / early-buyer data). Capture starts 2026-04-12 and persistence is gated to the launchpad pipeline (pump.fun, LaunchLab/bonk, bags) — it is NOT a full Solana trade history. Three separate answers (2026-09-21): `data_observed`/`in_scope` = at least one persisted row (presence, not completeness — a brand-new in-scope mint with no trades yet also reads false), `eligibility` = whether the CURRENT gate admits the subject, `completeness` = always `not_verified`. When no rows exist, zero/empty values mean ''not captured'' (see eligibility for why), never ''no activity''.'
+      properties:
+        history_start:
+          type: integer
+          example: 1775984757
+          description: Epoch seconds of the first persisted trade (2026-04-12).
+        scope:
+          type: string
+          example: pump.fun pipeline (pump.fun, LaunchLab/bonk, bags)
+        in_scope:
+          type: boolean
+          nullable: true
+          description: 'Kept for compatibility — same value as data_observed: true = we hold ≥1 persisted trade for this subject · false = none persisted (see eligibility for why — a brand-new in-scope mint also reads false) · null = probe unavailable'
+        data_observed:
+          type: boolean
+          nullable: true
+        eligibility:
+          type: string
+          nullable: true
+          enum:
+          - eligible
+          - lapsed
+          - excluded
+          - unknown
+          - admitted_previously
+          - not_applicable
+          - null
+          description: Resolved against the EFFECTIVE production capture settings (refreshed every few minutes; if they cannot be confirmed the answer narrows, never widens). eligible = admitted by the current gate · lapsed = launched via our pipeline, capture window closed under the current settings · excluded = blacklisted · unknown = no evidence the gate admits it (most likely outside the launchpad pipeline; basis capture_state_unavailable = settings could not be confirmed, no claim either way) · admitted_previously = persisted rows prove past admission, current status not established · not_applicable = wallet subjects · null = lookup failed
+        eligibility_basis:
+          type: string
+          nullable: true
+          description: Evidence behind eligibility (e.g. unresolved_launch, recently_bonded, revived_curve, pipeline_known, launchlab_pool, bags_vanity_mint, launchpad_proven, resolved_launch, bonded_over_7d, revival_expired, blacklisted, persisted_rows, capture_state_unavailable, lookup_failed)
+        completeness:
+          type: string
+          enum:
+          - not_verified
+        size_floor:
+          type: object
+          description: Persistence size floor of the same write path (added 2026-09-30). Buys under 0.05 SOL (under $3.50 when paid in USDC/USDT) are not stored; sells that receive SOL are kept at any size. Live streams, prices and candles are not subject to it.
+          properties:
+            min_sol:
+              type: number
+              example: 0.05
+            min_stable_usd:
+              type: number
+              example: 3.5
+            applies_to:
+              type: string
+              example: buys and SOL-spending legs; SOL-receiving sells of any size are kept
+        note:
+          type: string
+          description: 'How to read the values (always present since 2026-09-21: eligibility-specific when no rows exist, a completeness caveat when they do).'
+    ServiceUnavailableError:
+      type: object
+      description: '503: a temporary capacity or maintenance condition (e.g. a Postgres statement timeout during a partition move, or the API-key lookup itself being unavailable). Retry after `Retry-After` seconds.'
+      required:
+      - error
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+          description: Machine-readable code where one exists, e.g. `auth_backend_unavailable`.
+        error_kind:
+          type: string
+          description: e.g. `statement_timeout`, `auth_backend`
+        retry_after_seconds:
+          type: number
+        retryable:
+          type: boolean
+        support:
+          type: string
+        _rid:
+          type: string
+    WalletStats:
+      type: object
+      properties:
+        address:
+          type: string
+        stats:
+          type: object
+          nullable: true
+          properties:
+            first_seen:
+              type: string
+              format: date-time
+            last_seen:
+              type: string
+              format: date-time
+            total_trades:
+              type: integer
+            buys:
+              type: integer
+            sells:
+              type: integer
+            bought_sol:
+              type: number
+            sold_sol:
+              type: number
+            unique_tokens:
+              type: integer
+            window_days:
+              type: integer
+              description: Lookback window — currently 90
+        flags:
+          type: object
+          properties:
+            is_kol:
+              type: boolean
+            kol_name:
+              type: string
+              nullable: true
+            is_alpha_tracked:
+              type: boolean
+            bot_confidence:
+              type: string
+              nullable: true
+              enum:
+              - none
+              - low
+              - medium
+              - high
+              description: Bot-likeness classification from alpha-wallet rules
+            alpha_win_rate:
+              type: number
+              nullable: true
+            alpha_net_pnl_sol:
+              type: number
+              nullable: true
+            alpha_tokens_traded:
+              type: integer
+              nullable: true
+            is_deployer:
+              type: boolean
+            deployer_tokens_deployed:
+              type: integer
+              nullable: true
+            deployer_bonding_rate:
+              type: number
+              nullable: true
+            coverage_note:
+              type: string
+              description: 'Fixed disclosure: is_sniper/is_bundler/is_dumper derive from the launchpad trade pipeline — false means ''not observed in covered trades'', not ''verified clean''.'
+            is_sniper:
+              type: boolean
+              description: '>=5 tokens early-bought & >=80% flipped <5min (behavior-updated hourly). Pump.fun-pipeline scoped; false = not observed, not verified clean'
+            is_bundler:
+              type: boolean
+              description: Bought >1 token in the same block, ever (lifetime flag)
+            is_dumper:
+              type: boolean
+              description: '>=5 dump cohorts + 0 runner cohorts in rolling 42d window (recomputed daily)'
+            dump_cluster:
+              type: object
+              nullable: true
+              description: Raw dump-cluster cohort counts (present when the wallet has >=5 recent early-buyer cohort appearances)
+              properties:
+                dump_cohorts:
+                  type: integer
+                runner_cohorts:
+                  type: integer
+                total_cohorts:
+                  type: integer
+                as_of:
+                  type: string
+                  format: date-time
+        top_tokens:
+          type: array
+          description: Top traded tokens (90d window) with realized PnL. Cross-joined with deployer-tokens for symbol + peak MC where available.
+          items:
+            type: object
+            properties:
+              token_mint:
+                type: string
+              token_symbol:
+                type: string
+                nullable: true
+              buys:
+                type: integer
+              sells:
+                type: integer
+              sol_in:
+                type: number
+              sol_out:
+                type: number
+              realized_pnl_sol:
+                type: number
+              current_mc_usd:
+                type: number
+                nullable: true
+              peak_mc_usd:
+                type: number
+                nullable: true
+              last_traded_at:
+                type: string
+                format: date-time
+        trading_style:
+          type: object
+          nullable: true
+          description: 'Behavioural signals: avg trade size, sniper rate, round-trip rate, median hold time.'
+          properties:
+            total_trades:
+              type: integer
+            avg_trade_size_sol:
+              type: number
+            sniper_rate:
+              type: number
+              description: '0–1: fraction of trades with early_buyer_rank ≤ 10.'
+            early_entries:
+              type: integer
+            round_trip_rate:
+              type: number
+              description: '0–1: fraction of tokens with both buys and sells.'
+            tokens_with_round_trips:
+              type: integer
+            median_hold_minutes:
+              type: number
+              nullable: true
+              description: Median minutes between first buy and first sell across tokens.
+            dominant_action:
+              type: string
+              enum:
+              - buy
+              - sell
+              - balanced
+        deployer_breakdown:
+          type: object
+          nullable: true
+          description: Tier distribution of pump.fun deployers this wallet has bought from. Useful for spotting alpha-buyers vs random degens.
+          properties:
+            total_tokens:
+              type: integer
+            tracked_deployers:
+              type: integer
+            by_tier:
+              type: array
+              items:
+                type: object
+                properties:
+                  tier:
+                    type: string
+                    description: elite / good / rising / moderate / cold / unranked
+                  count:
+                    type: integer
+        recent_trades:
+          type: array
+          description: Last 10 trades regardless of window (raw timeline, cross-joined with deployer-tokens for symbol).
+          items:
+            type: object
+            properties:
+              token_mint:
+                type: string
+              token_symbol:
+                type: string
+                nullable: true
+              action:
+                type: string
+                enum:
+                - buy
+                - sell
+              sol_amount:
+                type: number
+              block_time:
+                type: integer
+              traded_at:
+                type: string
+                format: date-time
+              tx_signature:
+                type: string
+        derived:
+          type: object
+          description: 'Derived wallet stats computed from the enrichments above (src/lib/wallet-enrichments.ts DerivedStats: standout trades, biggest miss, realized/unrealized PnL rollups).'
+        coverage:
+          $ref: '#/components/schemas/TradeCoverage'
+        stats_unavailable:
+          type: boolean
+          description: Present (true) only when the 90-day trade aggregation failed. `stats` null is then UNPROVEN, not an inactive wallet.
+        enrichment_unavailable:
+          type: boolean
+          description: Present (true) only when one or more enrichment queries failed; `degraded_fields` names them. Absent on a fully measured response.
+        degraded_fields:
+          type: array
+          items:
+            type: string
+            enum:
+            - top_tokens
+            - trading_style
+            - deployer_breakdown
+            - recent_trades
+            - biggest_miss
+          description: 'Enrichment blocks whose query failed (e.g. a database timeout under load). Their null / [] value is UNKNOWN, not ''no data''; retry later. `biggest_miss` refers to `derived.biggest_miss`. Present only together with `enrichment_unavailable: true`.'
+      required:
+      - address
+      - flags
+    WalletOpenPosition:
+      type: object
+      properties:
+        token_mint:
+          type: string
+        token_amount:
+          type: number
+        cost_basis_sol:
+          type: number
+        avg_entry_price_sol:
+          type: number
+        current_price_sol:
+          type: number
+          nullable: true
+          description: Live from market-cap tracker. null if the mint has no current price (e.g. delisted).
+        current_value_sol:
+          type: number
+          nullable: true
+        unrealized_sol:
+          type: number
+          nullable: true
+        unrealized_pct:
+          type: number
+          nullable: true
+        first_buy_at:
+          type: string
+          format: date-time
+          nullable: true
+        buys_in_position:
+          type: integer
+    LaunchCoverage:
+      type: object
+      description: 'Dataset-scope disclosure injected on every 200 from the launch-pipeline feeds (`/deployer-hunter/*`, `/sniper/*`, `/alpha/*`, `/tokens/almost-bonded`, `/tokens/batch/risk`, `/wallet/batch/classify`) unless the route already carries a more precise per-subject `coverage`. Static: these datasets are built from launchpad ingest (in practice ~99% pump.fun), so an absent wallet/token, an empty profile or a `false` reputation flag means ''not observed by this pipeline'', never ''clean'' or ''no activity''.'
+      properties:
+        scope:
+          type: string
+          example: launchpad pipeline (pump.fun and LaunchLab/bonk deploys; bags.fm tokens are covered in trade data but their deploys are not attributed here; no direct-to-DEX launches)
+        note:
+          type: string
+          description: How to read absences and zeros in this response.
+    RateLimitError:
+      type: object
+      description: '429 when a quota is exhausted: the daily quota, the per-minute burst, or a free-tier network/key-rotation cap. `datasets` is added on `daily` only.'
+      required:
+      - error
+      - error_kind
+      - message
+      - tier
+      - limit
+      - resets_at
+      properties:
+        error:
+          type: string
+          enum:
+          - rate_limit_exceeded
+        error_kind:
+          type: string
+          enum:
+          - daily
+          - burst
+          - ip_cap
+          - ip_rotation
+        message:
+          type: string
+        tier:
+          type: string
+          enum:
+          - BASIC
+          - PRO
+          - ULTRA
+          - BUSINESS
+          - ENTERPRISE
+        limit:
+          type: integer
+        resets_at:
+          type: string
+          format: date-time
+        upgrade:
+          type: object
+          description: The plan that lifts this limit, with price and a checkout link.
+          properties:
+            tier:
+              type: string
+              enum:
+              - PRO
+              - ULTRA
+              - BUSINESS
+              - ENTERPRISE
+            price_eur_per_month:
+              type: number
+            price_usdc_per_month:
+              type: number
+            daily_limit:
+              type: integer
+            burst_limit:
+              type: integer
+            pitch:
+              type: string
+            url:
+              type: string
+            upgrade_url:
+              type: string
+              format: uri
+            reactivate:
+              type: boolean
+              description: Present (true) when the key's paid subscription has just lapsed and `tier` is the plan it held.
+            prior_tier:
+              type: string
+              enum:
+              - PRO
+              - ULTRA
+              - BUSINESS
+        datasets:
+          type: object
+          properties:
+            pitch:
+              type: string
+            url:
+              type: string
+              format: uri
+    WalletPnl:
+      type: object
+      properties:
+        address:
+          type: string
+        window_days:
+          type: integer
+        summary:
+          type: object
+          properties:
+            realized_sol:
+              type: number
+            unrealized_sol:
+              type: number
+            total_pnl_sol:
+              type: number
+            total_bought_sol:
+              type: number
+            total_sold_sol:
+              type: number
+            wins:
+              type: integer
+            losses:
+              type: integer
+            win_rate:
+              type: number
+              nullable: true
+            profit_factor:
+              type: number
+              nullable: true
+              description: Gross wins / gross losses. null if no losses (undefined math).
+            avg_hold_minutes:
+              type: integer
+              nullable: true
+            median_hold_minutes:
+              type: integer
+              nullable: true
+            max_drawdown_sol:
+              type: number
+            open_positions_count:
+              type: integer
+            closed_positions_count:
+              type: integer
+            total_tokens_traded:
+              type: integer
+            best_realized:
+              type: object
+              nullable: true
+              properties:
+                token_mint:
+                  type: string
+                realized_sol:
+                  type: number
+            worst_realized:
+              type: object
+              nullable: true
+              properties:
+                token_mint:
+                  type: string
+                realized_sol:
+                  type: number
+        pnl_curve:
+          type: array
+          description: Sparse daily UTC buckets — only days with at least one realized event are returned.
+          items:
+            type: object
+            properties:
+              date:
+                type: string
+                description: YYYY-MM-DD UTC
+              day_pnl:
+                type: number
+              cumulative_pnl:
+                type: number
+              trades:
+                type: integer
+        closed_positions:
+          type: array
+          description: Tokens where the wallet's position has been fully closed AND there was an observable buy in window. Sorted by pnl_sol DESC (winners first).
+          items:
+            $ref: '#/components/schemas/WalletClosedPosition'
+        open_positions:
+          type: array
+          items:
+            $ref: '#/components/schemas/WalletOpenPosition'
+        notes:
+          type: object
+          properties:
+            cost_basis_observable_from:
+              type: string
+              format: date-time
+              description: Cost basis can only be reconstructed from trades inside our data window. Overflow sells (no matching buy in window) are silently discarded rather than fabricated.
+            trades_through:
+              type: string
+              format: date-time
+              description: Newest trade included — the cache watermark (a later trade invalidates the cached analysis)
+            trades_through_block_time:
+              type: integer
+              description: trades_through as epoch seconds
+            trades_through_same_second:
+              type: integer
+              description: Trades at exactly trades_through_block_time that were included (block_time is second-granular; used to detect a same-second trade ingested after the compute)
+            partial:
+              type: boolean
+              description: Present (true) only when the wallet exceeded the trade analysis cap and the summary was computed from the most recent trades only.
+            analyzed_trades:
+              type: integer
+              description: Present only when partial is true — the number of most-recent trades the summary was computed from (the cap).
+            partial_reason:
+              type: string
+              description: Present only when partial is true — human-readable explanation of what the cap excludes (realized PnL for positions opened before cost_basis_observable_from; open positions limited to the analyzed window).
+        cache_hit:
+          type: boolean
+          description: true when served from wallet_analyses cache
+        computed_at:
+          type: string
+          format: date-time
+          description: Always returned — when the analysis was computed (the fresh compute time on a miss, the cached row's analyzed_at on a hit)
+        cache_age_seconds:
+          type: integer
+          description: Seconds since computed_at — the source age survives a cache hit (0 on a fresh compute)
+        cache_validation:
+          type: string
+          enum:
+          - head_checked
+          - unverified
+          description: 'Cache hits only (audit F16): head_checked = the wallet has no persisted trade newer than the analysis watermark, so the cached analysis is current; unverified = the trade-head probe failed and the unexpired cache was served flagged. A hit whose wallet traded after the watermark is never served — it is recomputed.'
+        cache_invalidated:
+          type: string
+          enum:
+          - new_activity
+          description: Present on a recompute that happened because a cached analysis existed but the wallet traded after it
+        ttl_seconds:
+          type: integer
+          description: Only present on cache misses — TTL for this row in wallet_analyses (5min / 1h / 24h based on activity)
+    Error:
+      type: object
+      description: Generic error envelope. `error` is always present (SDKs match on it). Errors returned after authentication also carry `_rid` and, on paid tiers, `support`; authentication-stage errors (missing/invalid key, origin) carry neither.
+      properties:
+        error:
+          type: string
+          description: Error message or machine code (e.g. `tier_required`, `rate_limit_exceeded`). Never changed once shipped.
+        message:
+          type: string
+          description: Human-readable explanation, when `error` is a machine code.
+        code:
+          type: string
+          description: Machine-readable sub-code on some errors (e.g. `invalid_query`, `invalid_wallet`, `origin_not_allowed`).
+        error_kind:
+          type: string
+          description: Machine-readable category on some errors (e.g. `statement_timeout`, `concurrency`, `daily`).
+        detail:
+          type: string
+          description: Extra human-readable context.
+        hint:
+          type: string
+        retry_after_seconds:
+          type: number
+          description: When present on a 429/503, the same value is sent as the `Retry-After` header.
+        signup_url:
+          type: string
+          format: uri
+          description: 'On the missing-key / bad-format 401: where to get a free key.'
+        docs_url:
+          type: string
+          format: uri
+        support:
+          type: string
+          description: 'Paid tiers, errors after authentication: priority support contact.'
+        _rid:
+          type: string
+          description: Request ID — include when reporting issues
+      required:
+      - error
+    WalletTrade:
+      type: object
+      properties:
+        tx_signature:
+          type: string
+        token_mint:
+          type: string
+        action:
+          type: string
+          enum:
+          - buy
+          - sell
+        sol_amount:
+          type: number
+        token_amount:
+          type: number
+        price_sol:
+          type: number
+          nullable: true
+          description: This trade's executed price (sol_amount / token_amount); null on dust / zero-SOL legs
+        price_usd:
+          type: number
+          nullable: true
+        market_price_sol:
+          type: number
+          nullable: true
+          description: mc-tracker's canonical pool price sampled near this trade's slot — not this trade's price
+        market_price_usd:
+          type: number
+          nullable: true
+        block_time:
+          type: integer
+          description: Unix epoch seconds
+        traded_at:
+          type: string
+          format: date-time
+    WalletClosedPosition:
+      type: object
+      properties:
+        token_mint:
+          type: string
+        buy_count:
+          type: integer
+        sell_count:
+          type: integer
+        bought_sol:
+          type: number
+        sold_sol:
+          type: number
+        pnl_sol:
+          type: number
+        roi_pct:
+          type: number
+          nullable: true
+          description: realized_sol / total_bought_sol × 100
+        hold_minutes:
+          type: integer
+          nullable: true
+          description: first buy to last sell
+        result:
+          type: string
+          enum:
+          - win
+          - loss
+          - breakeven
+        first_trade:
+          type: string
+          format: date-time
+          nullable: true
+        last_trade:
+          type: string
+          format: date-time
+          nullable: true
+  headers:
+    XRateLimitReset:
+      description: When the window resets, as a Unix epoch in SECONDS (next 00:00 UTC for the daily quota; about 60 s ahead for a per-minute bucket).
+      schema:
+        type: integer
+      example: 1791158400
+    XRateLimitRemaining:
+      description: Calls left in that window. `0` on a quota 429.
+      schema:
+        type: integer
+        minimum: 0
+      example: 9412
+    XDataDelay:
+      description: 'Free-tier only: the feed in this body is delayed by this many seconds (same value as the body''s `delay_seconds`). Absent on real-time responses.'
+      schema:
+        type: integer
+        minimum: 1
+      example: 300
+    XRateLimitLimit:
+      description: 'Size of the rate-limit window this call was counted against: the daily quota for your tier on data endpoints, the per-minute bucket on `/stream/token` (10) and `/stream/sessions` (30), the hourly allowance for the public demo key. Sent once the key has been authenticated and rate-limited, so it is absent on authentication-stage errors.'
+      schema:
+        type: integer
+        minimum: 0
+      example: 10000
+    XMadeOnSolQuotaWarning:
+      description: 'Free-tier only, past about 70 % of the daily quota: a human-readable usage line with an upgrade link.'
+      schema:
+        type: string
+      example: '150/200 used - upgrade for 50x higher limits: https://madeonsol.com/checkout?tier=PRO'
+    XRequestId:
+      description: Unique id of this response. On responses built after authentication it is also the `request_id` of the audit-log row for the call, so quote it in a support request. Present on every response of the keyed API.
+      required: true
+      schema:
+        type: string
+        format: uuid
+      example: 3f6c1d2e-8a4b-4f7e-9c21-5b0d7e6a9f13
+    XRateLimitUsed:
+      description: Calls used in that window (`limit − remaining`).
+      schema:
+        type: integer
+        minimum: 0
+      example: 588
+    RetryAfter:
+      description: Seconds to wait before retrying (RFC 9110 delay-seconds, at least 1). Sent on every 429 (quota, concurrency, authentication-failure) and every 503; when the body carries `retry_after_seconds` it is the same value.
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+      example: 10
+  responses:
+    ServiceUnavailable:
+      description: 'Temporarily unavailable — a Postgres statement timeout while the dataset is under load or maintenance (`statement_timeout`, with `X-RateLimit-*` and `_rid`), or the API-key lookup itself unavailable (`auth_backend_unavailable`, authentication stage: no `X-RateLimit-*`, no `_rid`, not counted as a failed authentication). Always carries `Retry-After`; honour it.'
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        X-RateLimit-Limit:
+          $ref: '#/components/headers/XRateLimitLimit'
+        X-RateLimit-Remaining:
+          $ref: '#/components/headers/XRateLimitRemaining'
+        X-RateLimit-Used:
+          $ref: '#/components/headers/XRateLimitUsed'
+        X-RateLimit-Reset:
+          $ref: '#/components/headers/XRateLimitReset'
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ServiceUnavailableError'
+          examples:
+            statement_timeout:
+              summary: Statement timeout
+              value:
+                error: Query timed out — this dataset is under load or being maintained. Retry shortly.
+                error_kind: statement_timeout
+                retry_after_seconds: 10
+                _rid: eyJ1IjoiZXhhbXBsZSIsInQiOjE3OTEwMDAwMDAwMDAsImgiOiIwMDAwMDAwMCJ9
+            auth_backend:
+              summary: API-key lookup unavailable
+              value:
+                error: Authentication temporarily unavailable — please retry.
+                code: auth_backend_unavailable
+                error_kind: auth_backend
+                retryable: true
+                retry_after_seconds: 5
+    TierForbidden:
+      description: 'Forbidden. One of: the key''s tier is below this endpoint''s or parameter''s gate (`tier_required` with an `upgrade` block); the public demo key used outside its allow-list (`demo_key_endpoint_not_allowed`); an invalid or revoked key; an origin-restricted key called from a disallowed origin (`code` `origin_not_allowed` / `origin_required`). `X-RateLimit-*` headers are present only on `tier_required`.'
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        X-RateLimit-Limit:
+          $ref: '#/components/headers/XRateLimitLimit'
+        X-RateLimit-Remaining:
+          $ref: '#/components/headers/XRateLimitRemaining'
+        X-RateLimit-Used:
+          $ref: '#/components/headers/XRateLimitUsed'
+        X-RateLimit-Reset:
+          $ref: '#/components/headers/XRateLimitReset'
+      content:
+        application/json:
+          schema:
+            anyOf:
+            - $ref: '#/components/schemas/TierRequiredError'
+            - $ref: '#/components/schemas/DemoKeyNotAllowedError'
+            - $ref: '#/components/schemas/Error'
+          examples:
+            tier_required:
+              summary: Tier below the gate
+              value:
+                error: tier_required
+                message: This endpoint requires ULTRA tier — you're on PRO.
+                feature: This endpoint
+                your_tier: PRO
+                required_tier: ULTRA
+                upgrade:
+                  tier: ULTRA
+                  price_eur_per_month: 131
+                  price_usdc_per_month: 149
+                  daily_limit: 100000
+                  burst_limit: 600
+                  pitch: …
+                  url: https://madeonsol.com/pricing
+                  upgrade_url: https://madeonsol.com/checkout?tier=ULTRA
+                support: 'Priority support: info@madeonsol.com'
+                _rid: eyJ1IjoiZXhhbXBsZSIsInQiOjE3OTEwMDAwMDAwMDAsImgiOiIwMDAwMDAwMCJ9
+            demo_key:
+              summary: Demo key outside its allow-list
+              value:
+                error: demo_key_endpoint_not_allowed
+                message: The public demo key works on /kol/feed, /deployer-hunter/alerts, and /alpha/leaderboard only. This endpoint requires the PRO plan or higher; a free API key will not unlock it. See https://madeonsol.com/pricing.
+                endpoint_tier: PRO
+                allowed_endpoints:
+                - /api/v1/kol/feed
+                - /api/v1/deployer-hunter/alerts
+                - /api/v1/alpha/leaderboard
+                signup_url: https://madeonsol.com/developer
+                upgrade_url: https://madeonsol.com/checkout?tier=PRO
+            revoked_key:
+              summary: Invalid or revoked key
+              value:
+                error: Invalid or revoked API key
+    InternalError:
+      description: Unexpected server error from the route (`Internal server error`, with `_rid`). Safe to retry with backoff. A failed API-key lookup is a 503 `auth_backend_unavailable`, never a 500.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        X-RateLimit-Limit:
+          $ref: '#/components/headers/XRateLimitLimit'
+        X-RateLimit-Remaining:
+          $ref: '#/components/headers/XRateLimitRemaining'
+        X-RateLimit-Used:
+          $ref: '#/components/headers/XRateLimitUsed'
+        X-RateLimit-Reset:
+          $ref: '#/components/headers/XRateLimitReset'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            route:
+              summary: Route error
+              value:
+                error: Internal server error
+                _rid: eyJ1IjoiZXhhbXBsZSIsInQiOjE3OTEwMDAwMDAwMDAsImgiOiIwMDAwMDAwMCJ9
+    RateLimited:
+      description: Too many requests. Every 429 carries `Retry-After`. A quota 429 (`rate_limit_exceeded`, with `X-RateLimit-*`), a heavy-query concurrency 429 (`error_kind` `concurrency`/`capacity`), or the per-IP authentication-failure block (30 failed auths/min; plain `error` + `retry_after_seconds`, no `X-RateLimit-*`).
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        X-RateLimit-Limit:
+          $ref: '#/components/headers/XRateLimitLimit'
+        X-RateLimit-Remaining:
+          $ref: '#/components/headers/XRateLimitRemaining'
+        X-RateLimit-Used:
+          $ref: '#/components/headers/XRateLimitUsed'
+        X-RateLimit-Reset:
+          $ref: '#/components/headers/XRateLimitReset'
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/json:
+          schema:
+            anyOf:
+            - $ref: '#/components/schemas/RateLimitError'
+            - $ref: '#/components/schemas/ConcurrencyLimitError'
+            - $ref: '#/components/schemas/Error'
+          examples:
+            daily:
+              summary: Daily quota exhausted
+              value:
+                error: rate_limit_exceeded
+                error_kind: daily
+                message: Daily rate limit exceeded — 200/day for BASIC tier. Resets at midnight UTC.
+                tier: BASIC
+                limit: 200
+                resets_at: '2026-10-05T00:00:00.000Z'
+                upgrade:
+                  tier: PRO
+                  price_eur_per_month: 43
+                  price_usdc_per_month: 49
+                  daily_limit: 10000
+                  burst_limit: 300
+                  pitch: …
+                  url: https://madeonsol.com/pricing
+                  upgrade_url: https://madeonsol.com/checkout?tier=PRO
+                datasets:
+                  pitch: …
+                  url: https://madeonsol.com/datasets
+            concurrency:
+              summary: Too many heavy queries in flight
+              value:
+                error: Too many concurrent heavy queries. Up to 8 of these endpoints may be in flight at once per key — retry in a moment, or lower your request concurrency.
+                error_kind: concurrency
+                retry_after_seconds: 2
+                max_concurrent: 8
+                _rid: eyJ1IjoiZXhhbXBsZSIsInQiOjE3OTEwMDAwMDAwMDAsImgiOiIwMDAwMDAwMCJ9
+            auth_failures:
+              summary: Per-IP authentication-failure block
+              value:
+                error: Too many authentication failures from this IP. Retry in 60s.
+                retry_after_seconds: 42
+    AuthBackendUnavailable:
+      description: 'The API-key or subscription lookup could not be answered (authentication stage). Retryable and not your fault: it is never counted as a failed authentication. Honour `Retry-After`; no `X-RateLimit-*`, no `_rid`.'
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ServiceUnavailableError'
+          examples:
+            auth_backend:
+              summary: API-key lookup unavailable
+              value:
+                error: Authentication temporarily unavailable — please retry.
+                code: auth_backend_unavailable
+                error_kind: auth_backend
+                retryable: true
+                retry_after_seconds: 5
+    Unauthorized:
+      description: 'Missing or invalid API key, or an expired free-tier key. Authentication-stage error: no `X-RateLimit-*` headers, no `_rid`.'
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            missing_key:
+              summary: No Bearer key
+              value:
+                error: 'Missing authentication — use API key (Authorization: Bearer msk_...)'
+                hint: Get a free API key — 200 calls/day, no payment
+                signup_url: https://madeonsol.com/developer
+                docs_url: https://madeonsol.com/api-docs
+            bad_format:
+              summary: Malformed key
+              value:
+                error: Invalid API key format
+                hint: Get a free API key — 200 calls/day, no payment
+                signup_url: https://madeonsol.com/developer
+                docs_url: https://madeonsol.com/api-docs
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: msk_...
+      description: Get a free API key at https://madeonsol.com/developer
+x-madeonsol-tiers:
+- tier: FREE
+  plan: BASIC
+  name: Free
+  price_eur_monthly: 0
+  price_eur_annual: 0
+  price_usd_monthly: 0
+  daily_limit: 200
+  burst_limit: 60
+  url: https://madeonsol.com/developer
+- tier: PRO
+  plan: PRO
+  name: Pro
+  price_eur_monthly: 43
+  price_eur_annual: 430
+  price_usd_monthly: 49
+  daily_limit: 10000
+  burst_limit: 300
+  url: https://madeonsol.com/checkout?tier=PRO
+- tier: ULTRA
+  plan: ULTRA
+  name: Ultra
+  price_eur_monthly: 131
+  price_eur_annual: 1310
+  price_usd_monthly: 149
+  daily_limit: 100000
+  burst_limit: 600
+  url: https://madeonsol.com/checkout?tier=ULTRA
+- tier: BUSINESS
+  plan: BUSINESS
+  name: Business
+  price_eur_monthly: 400
+  price_eur_annual: 4000
+  price_usd_monthly: 456
+  daily_limit: 500000
+  burst_limit: 3000
+  url: https://madeonsol.com/checkout?tier=BUSINESS
+- tier: ENTERPRISE
+  plan: ENTERPRISE
+  name: Enterprise
+  price_eur_monthly: null
+  price_eur_annual: null
+  price_usd_monthly: null
+  daily_limit: null
+  burst_limit: null
+  url: https://madeonsol.com/pricing#enterprise
