@@ -215,6 +215,8 @@ apis:
   humanURL: https://madeonsol.com/api-docs
   baseURL: https://madeonsol.com/api/v1
   tags:
+  - Export
+  tags_raw:
   - Exports
   properties:
   - type: OpenAPI
@@ -376,6 +378,8 @@ apis:
   humanURL: https://madeonsol.com/api-docs
   baseURL: https://madeonsol.com/api/v1
   tags:
+  - Wallets
+  tags_raw:
   - Wallet
   properties:
   - type: OpenAPI
@@ -409,6 +413,8 @@ apis:
   humanURL: https://madeonsol.com/api-docs
   baseURL: https://madeonsol.com/api/v1
   tags:
+  - Webhook
+  tags_raw:
   - Webhooks
   properties:
   - type: OpenAPI
