@@ -1236,3 +1236,9 @@ x-madeonsol-tiers:
   daily_limit: null
   burst_limit: null
   url: https://madeonsol.com/pricing#enterprise
+x-provenance:
+  method: harvested
+  publisher: MadeOnSol
+  source: https://madeonsol.com/api/v1/openapi.json
+  note: split by refine-openapis from the provider's own published document, verified by fetch (openapi/_original/*.fetch.json);
+    stamped by stamp-openapi-provenance.py (roadmap#793)
