@@ -64,5 +64,143 @@
 > Full detail: **[Where this data comes from](https://apievangelist.com/about/where-our-data-comes-from)**
 <!-- API-EVANGELIST-PROVENANCE:END -->
 
-MadeOnSol is a company surfaced via the API Evangelist harvest backlog (source: new-submission) and added to the network as a stub for full-pipeline profiling.
-- https://madeonsol.com
+MadeOnSol provides on-chain intelligence APIs for Solana and Robinhood Chain, offering real-time KOL wallet tracking, deployer reputation scoring, and all-DEX trade streams. It also hosts a directory of tools and a developer API with SDKs and a pay-per-call x402 model.
+
+**Areas:** Blockchain · Analytics · Solana · Robinhood Chain
+
+## MadeOnSol on APIs.io
+
+Everything profiled for MadeOnSol is published on APIs.io rather than in this repository. Start at the provider page — **[apis.io/providers/madeonsol/](https://apis.io/providers/madeonsol/)** — or go straight to one of the APIs or properties below.
+
+### APIs (20)
+
+- [MadeOnSol API](https://apis.io/apis/madeonsol/madeonsol-api/) — The primary keyed MadeOnSol REST API (Bearer msk_ API keys, free and paid tiers), version 1.20.0 with 198 operations across Solana and Robinhood Chain (78…
+- [MadeOnSol Account API](https://apis.io/apis/madeonsol/madeonsol-account-api/) — Self-service account inspection — quota, tier, feature usage. 1 operation(s) of the keyed MadeOnSol API (Bearer msk_ key).
+- [MadeOnSol Alpha API](https://apis.io/apis/madeonsol/madeonsol-alpha-api/) — Profitable non-KOL alpha wallets — leaderboard + per-wallet drilldown. 5 operation(s) of the keyed MadeOnSol API (Bearer msk_ key).
+- [MadeOnSol Copy Trade API](https://apis.io/apis/madeonsol/madeonsol-copy-trade-api/) — Rule-based copy-trade subscriptions (PRO+). 6 operation(s) of the keyed MadeOnSol API (Bearer msk_ key).
+- [MadeOnSol Deployer Hunter API](https://apis.io/apis/madeonsol/madeonsol-deployer-hunter-api/) — Pump.fun deployer reputation alerts, leaderboard, and per-deployer drilldowns. 13 operation(s) of the keyed MadeOnSol API (Bearer msk_ key).
+- [MadeOnSol Exports API](https://apis.io/apis/madeonsol/madeonsol-exports-api/) — Bulk Parquet exports of every fully archived closed month (token_trades, rhc_trades, token_ohlc_1m, rhc_ohlc_1m) via presigned S3 links. BUSINESS+. 1…
+- [MadeOnSol KOL API](https://apis.io/apis/madeonsol/madeonsol-kol-api/) — KOL wallet trade feed, leaderboard, coordination, hot tokens, and per-KOL profile. 29 operation(s) of the keyed MadeOnSol API (Bearer msk_ key).
+- [MadeOnSol Meta API](https://apis.io/apis/madeonsol/madeonsol-meta-api/) — Nightly dataset manifests — per-dataset fingerprint and schema hash to cite an exact data state. Any key. 1 operation(s) of the keyed MadeOnSol API (Bearer…
+- [MadeOnSol Price Alerts API](https://apis.io/apis/madeonsol/madeonsol-price-alerts-api/) — Token MC dip/recovery alerts, evaluated every 250 ms. PRO+ (PRO 5 / ULTRA 25 / BUSINESS 125 rules). 6 operation(s) of the keyed MadeOnSol API (Bearer msk_ key).
+- [MadeOnSol Robinhood Chain API](https://apis.io/apis/madeonsol/madeonsol-robinhood-chain-api/) — Robinhood Chain (chain id 4663) coverage — same intel, EVM-native contracts (0x addresses, eth_amount, tx_hash). Bundled into existing tiers at no extra…
+- [MadeOnSol Sniper API](https://apis.io/apis/madeonsol/madeonsol-sniper-api/) — Pre-confirmation pump.fun deploy detection — recent deploys, by-deployer feed, custom watchlist. PRO+ (curated to elite/good deployers); ULTRA gets every…
+- [MadeOnSol Status API](https://apis.io/apis/madeonsol/madeonsol-status-api/) — Public service health + data-quality status (no auth). 1 operation(s) of the keyed MadeOnSol API (Bearer msk_ key).
+- [MadeOnSol Streaming API](https://apis.io/apis/madeonsol/madeonsol-streaming-api/) — WebSocket stream tokens and live session management — 30 channels (16 Solana + 14 Robinhood Chain) on one socket, with seq/id on event frames and resume…
+- [MadeOnSol Tokens API](https://apis.io/apis/madeonsol/madeonsol-tokens-api/) — Token-level buyer-quality, cap-table, and filtered token directory. 26 operation(s) of the keyed MadeOnSol API (Bearer msk_ key).
+- [MadeOnSol Tools API](https://apis.io/apis/madeonsol/madeonsol-tools-api/) — Public Solana & Robinhood Chain tools directory search. 1 operation(s) of the keyed MadeOnSol API (Bearer msk_ key).
+- [MadeOnSol Wallet API](https://apis.io/apis/madeonsol/madeonsol-wallet-api/) — Universal per-wallet endpoints: aggregate stats with cross-product flags, FIFO cost-basis PnL with daily curve, open positions with live unrealized, and…
+- [MadeOnSol Wallet Tracker API](https://apis.io/apis/madeonsol/madeonsol-wallet-tracker-api/) — Track any Solana wallet — aggregate stats and recent trades. 6 operation(s) of the keyed MadeOnSol API (Bearer msk_ key).
+- [MadeOnSol Webhooks API](https://apis.io/apis/madeonsol/madeonsol-webhooks-api/) — HMAC-signed webhook registrations for KOL, deployer, wallet-tracker, sniper, token momentum, RHC KOL and realtime developer activity (dev:activity, live…
+- [MadeOnSol x402 Robinhood Chain API](https://apis.io/apis/madeonsol/madeonsol-x402-robinhood-chain-api/) — Keyless x402 pay-per-call subset of MadeOnSol for Robinhood Chain: 10 operations priced per call in USDG on Robinhood Chain (EIP-3009), no API key. A…
+- [MadeOnSol x402 Solana API](https://apis.io/apis/madeonsol/madeonsol-x402-solana-api/) — Keyless x402 pay-per-call subset of MadeOnSol for Solana: 25 operations priced per call in USDC on Solana, no API key. A separate, smaller surface than the…
+
+### Published properties
+
+Each property below is a page on APIs.io carrying the machine-readable artifact and what it says.
+
+#### MCP servers (1)
+
+Model Context Protocol servers that expose the API to agents.
+
+- [madeonsol-mcp.yml](https://apis.io/servers/madeonsol/madeonsol-mcp-yml/)
+
+#### Agentic access (1)
+
+Which operations an agent can call, which act, and which need a human in the loop.
+
+- [Madeonsol Agentic Access](https://apis.io/agentic-access/madeonsol/madeonsol-agentic-access/)
+
+#### Governance rules (1)
+
+Spectral rulesets for the provider's contracts.
+
+- [MadeOnSol API Rules](https://apis.io/rules/madeonsol/madeonsol-rules/)
+
+#### Security (4)
+
+Authentication, trust centre, and vulnerability disclosure.
+
+- [Madeonsol Authentication](https://apis.io/security/madeonsol/madeonsol-authentication/)
+- [Madeonsol Domain Security](https://apis.io/security/madeonsol/madeonsol-domain-security/)
+- [Madeonsol Trust Center](https://apis.io/security/madeonsol/madeonsol-trust-center/)
+- [Madeonsol Vulnerability Disclosure](https://apis.io/security/madeonsol/madeonsol-vulnerability-disclosure/)
+
+#### Plans and pricing (1)
+
+Published plans, tiers and prices.
+
+- [Madeonsol Plans Pricing](https://apis.io/plans/madeonsol/madeonsol-plans-pricing/)
+
+## Where to find this API
+
+Links to the company's own pages. This repository publishes no copy of their specifications — the canonical document is theirs and lives at the URLs below.
+
+- [Website](https://madeonsol.com)
+- [Documentation](https://madeonsol.com/api-docs)
+- [Pricing](https://madeonsol.com/pricing)
+- [Sign up](https://madeonsol.com/auth/login?next=%2F)
+- [Support](https://madeonsol.com/about)
+- [Changelog](https://madeonsol.com/changelog)
+- [Blog](https://madeonsol.com/blog)
+- [Security](https://madeonsol.com/security)
+- [Compliance](https://madeonsol.com/security)
+- [Terms of service](https://madeonsol.com/terms)
+- [Privacy policy](https://madeonsol.com/privacy)
+- [GitHub](https://github.com/madeonsol)
+- [Status](https://madeonsol.com/status)
+
+## API Evangelist rating
+
+**Kin Score 63.4** — strong · rubric 0.25.0 · scored 2026-10-23
+
+| Facet | Score |
+|---|---|
+| Discoverability | 75.0 |
+| Contract quality | 51.8 |
+| Contract governance | 15.9 |
+| Operational transparency | 47.4 |
+| Developer ergonomics | 70.7 |
+| Access clarity | 92.1 |
+
+**Agent readiness 36.4** — agent-ready
+
+| Agent-readiness dimension | Result |
+|---|---|
+| Spec Presence | yes |
+| Agentic Access | derived (partial credit) |
+| Reversibility Documented | — |
+| MCP Server | — |
+| Auth Clarity | bearer (partial credit) |
+| Idempotency | — |
+| Error Semantics | verified |
+| OpenAPI Examples | partial |
+| Rate Limit Signal | verified |
+| Event Surface Described | — |
+| Agent Skills | unknown |
+| Well Known Catalog | — |
+| Consent Identity | — |
+| Agent Card | — |
+| Dry Run Mode | — |
+| Delegated Identity | — |
+| Protected Resource Metadata | — |
+| Dynamic Client Registration | — |
+| Agentic Commerce | — |
+| Pagination Ratio | paginated |
+| Operation Distinctiveness | mostly |
+
+**Regulatory alignment 35.3** — Horizontal (data, software, accessibility, platform)
+
+The rubric is published at [github.com/api-evangelist/kin-score](https://github.com/api-evangelist/kin-score). The per-check breakdown behind these numbers — which checks were earned, partial or missed — along with score history and how this provider compares to its peers, is available at [apis.io/providers/madeonsol/](https://apis.io/providers/madeonsol/).
+
+## How this profile is made
+
+API Evangelist profiles a company's public API surface the way a developer would find it: the website, developer portal and documentation, the specifications it publishes, its public repositories, and its pricing, status and changelog pages. From that it derives the properties above — contracts split per API, workflows, schemas, collections, governance rules, plans and rate limits — and scores them against the published [Kin Score rubric](https://github.com/api-evangelist/kin-score).
+
+The artifacts are published on [APIs.io](https://apis.io), not in this repository. This repository is the public record for MadeOnSol: the place to say something is wrong, missing or out of date, and to ask for a re-score or a removal.
+
+## Open an issue
+
+- **Something about this listing** — a wrong description, a missing API, a stale artifact or a question about the rating: [open an issue on this repository](https://github.com/api-evangelist/madeonsol/issues/new).
+- **A new API, or one that is not in the catalog yet** — [submit it on APIs.io](https://apis.io/add/).
+- **Anything else** — [the APIs.io inbox](https://github.com/api-search/inbox/issues/new) or [info@apievangelist.com](mailto:info@apievangelist.com).
